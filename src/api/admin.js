@@ -1,0 +1,14 @@
+import client from './client'
+
+export const getUsers = () => client.get('/users')
+export const createUser = (data) => client.post('/users', data)
+export const getLogs = (params) => client.get('/logs', { params })
+export const getBasestations = () => client.get('/basestations')
+export const getCabinets = () => client.get('/cabinets')
+export const getControllers = () => client.get('/controllers')
+export const getCommissioningForLamp = (id) => client.post(`/commissioning/${id}/advance`)
+export const advanceCommissioning = (id) => client.post(`/commissioning/${id}/advance`)
+export const testCommCom = (id) => client.post(`/commissioning/${id}/test-comm`)
+export const testDimmingCom = (id) => client.post(`/commissioning/${id}/test-dimming`)
+export const validateCommissioning = (id) => client.post(`/commissioning/${id}/validate`)
+export const failCommissioning = (id) => client.post(`/commissioning/${id}/fail`)
