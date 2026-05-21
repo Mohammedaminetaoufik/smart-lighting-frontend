@@ -11,4 +11,7 @@ export const advanceCommissioning = (id) => client.post(`/commissioning/${id}/ad
 export const testCommCom = (id) => client.post(`/commissioning/${id}/test-comm`)
 export const testDimmingCom = (id) => client.post(`/commissioning/${id}/test-dimming`)
 export const validateCommissioning = (id) => client.post(`/commissioning/${id}/validate`)
-export const failCommissioning = (id) => client.post(`/commissioning/${id}/fail`)
+export const failCommissioning    = (id)   => client.post(`/commissioning/${id}/fail`)
+export const batchTestCommissioning = (body) => client.post('/commissioning/batch-test', body)
+export const validateSuccessful     = ()    => client.post('/commissioning/validate-successful')
+export const retryFailed            = ()    => client.post('/commissioning/retry-failed')

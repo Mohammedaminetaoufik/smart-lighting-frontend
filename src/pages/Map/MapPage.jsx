@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useTheme } from '../../context/ThemeContext'
 import {
   MapContainer, TileLayer, Marker, Circle, Polyline,
@@ -8,7 +9,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import toast from 'react-hot-toast'
 import { getLampadaires, getMissingLocation, updateLocation, setDimming as apiSetDimming, getLatestTelemetry, assignLCU as apiAssignLCU } from '../../api/lampadaires'
-import { getLCUs, createLCU as apiCreateLCU } from '../../api/lcus'
+import { getLCUs, createLCU as apiCreateLCU, bulkDimLCU as apiBulkDimLCU } from '../../api/lcus'
 import { PageLoader } from '../../components/ui/Spinner'
 import Button from '../../components/ui/Button'
 import {
@@ -16,7 +17,7 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   Layers, RefreshCw, Power, PowerOff,
   AlertTriangle, Thermometer, Eye, Activity, MapPin,
-  LocateFixed, SkipForward, Plus,
+  LocateFixed, SkipForward, Plus, Workflow,
 } from 'lucide-react'
 import { cn } from '../../utils/helpers'
 
@@ -295,9 +296,7 @@ export default function MapPage() {
       ? { ...prev, data: { ...prev.data, intensite: intensity } }
       : prev)
     try {
-      await Promise.all(groupLamps.map((l) =>
-        apiSetDimming(l.id, { intensity, reason: `Groupe ${lcu.reference || lcu.name} - ${intensity}%` })
-      ))
+      await apiBulkDimLCU(lcu.id, { intensity, reason: `Groupe ${lcu.reference || lcu.name} - ${intensity}%` })
       toast.success(`Intensité ${intensity}% appliquée — ${lcu.reference || lcu.name}`)
     } catch (e) {
       toast.error(e.message)
@@ -316,7 +315,7 @@ export default function MapPage() {
       ? { ...prev, data: { ...prev.data, intensite: intensity } }
       : prev)
     try {
-      await Promise.all(groupLamps.map((l) => apiSetDimming(l.id, { intensity, reason: `Groupe ${lcu.reference || lcu.name} - ${on ? 'ON' : 'OFF'}` })))
+      await apiBulkDimLCU(lcu.id, { intensity, reason: `Groupe ${lcu.reference || lcu.name} - ${on ? 'ON' : 'OFF'}` })
       toast.success(`${groupLamps.length} lampadaires ${on ? 'allumés' : 'éteints'} — ${lcu.reference || lcu.name}`)
     } catch (e) {
       setLamps((prev) => prev.map((l) => l.lcu_id === lcu.id ? { ...l, intensite: l.intensite } : l))
@@ -655,10 +654,11 @@ export default function MapPage() {
 
             {/* Search */}
             <div className="relative">
-              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/40" />
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/40 pointer-events-none z-10" />
               <input value={search} onChange={(e) => setSearch(e.target.value)}
                 placeholder="Rechercher référence, zone…"
-                className="w-full bg-white/8 border border-white/10 rounded-xl pl-8 pr-3 py-2 text-[12px] text-white placeholder:text-white/30 focus:outline-none focus:border-brand-500/60 focus:bg-white/12" />
+                style={{ backgroundColor: 'rgba(0,0,0,0.35)', color: 'white', colorScheme: 'dark' }}
+                className="w-full border border-white/15 rounded-xl pl-8 pr-3 py-2 text-[12px] placeholder:text-white/35 focus:outline-none focus:border-brand-500/60 focus:ring-1 focus:ring-brand-500/30" />
               {search && (
                 <button onClick={() => setSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/40 hover:text-white">
                   <X size={12} />
@@ -966,7 +966,8 @@ export default function MapPage() {
                     value={newLCUForm[key]}
                     onChange={(e) => setNewLCUForm((f) => ({ ...f, [key]: e.target.value }))}
                     placeholder={placeholder}
-                    className="w-full mt-0.5 bg-white/8 border border-white/10 rounded-lg px-2.5 py-1.5 text-[12px] text-white placeholder:text-white/25 focus:outline-none focus:border-blue-400/60"
+                    style={{ backgroundColor: 'rgba(255,255,255,0.07)', color: 'white', colorScheme: 'dark' }}
+                    className="w-full mt-0.5 border border-white/10 rounded-lg px-2.5 py-1.5 text-[12px] placeholder:text-white/25 focus:outline-none focus:border-blue-400/60"
                   />
                 </div>
               ))}
@@ -1174,12 +1175,7 @@ function LampCard({ lamp, lcu, allLCUs = [], onClose, flyTo, onUpdateIntensity, 
     getLatestTelemetry(lamp.id).then(setTelemetry).catch(() => {})
   }, [lamp.id])
 
-  useEffect(() => {
-    if (!pickingLCU) return
-    const close = () => setPickingLCU(false)
-    document.addEventListener('click', close, { capture: true, once: true })
-    return () => document.removeEventListener('click', close, { capture: true })
-  }, [pickingLCU])
+  // pickingLCU is now closed via a backdrop div — no document listener needed
 
   const applyIntensity = async (intensity) => {
     setDimVal(intensity)
@@ -1290,30 +1286,34 @@ function LampCard({ lamp, lcu, allLCUs = [], onClose, flyTo, onUpdateIntensity, 
         </button>
 
         {pickingLCU && (
-          <div className="absolute left-0 bottom-full mb-2 z-20 w-52 rounded-xl overflow-hidden shadow-2xl"
-            style={{ background:'rgba(11,14,24,0.99)', border:'1px solid rgba(255,255,255,0.12)' }}>
-            <p className="px-3 py-2 text-[10px] font-bold text-white/25 uppercase tracking-widest border-b border-white/8">LCU</p>
-            <div className="max-h-44 overflow-y-auto">
-              {allLCUs.map((l) => (
-                <button key={l.id} onClick={() => handleAssignLCU(l.id)}
-                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-blue-500/20 transition-colors text-left border-b border-white/4">
-                  <Radio size={9} className="text-blue-400 shrink-0" />
-                  <span className="text-[11px] font-mono text-white/75 flex-1 truncate">{l.reference || l.name}</span>
-                  {Number(l.id) === Number(lamp.lcu_id) && <span className="text-blue-400 text-[9px]">✓</span>}
-                </button>
-              ))}
-              {lcu && (
-                <button onClick={() => handleAssignLCU(null)}
-                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-red-500/15 transition-colors text-left">
-                  <X size={9} className="text-red-400" />
-                  <span className="text-[11px] text-red-400">Retirer</span>
-                </button>
-              )}
-              {allLCUs.length === 0 && (
-                <p className="text-[11px] text-white/25 px-3 py-2 text-center">Aucune LCU</p>
-              )}
+          <>
+            {/* Transparent backdrop — clicking outside closes the dropdown without interfering with buttons inside */}
+            <div className="fixed inset-0 z-10" onClick={() => setPickingLCU(false)} />
+            <div className="absolute left-0 bottom-full mb-2 z-20 w-52 rounded-xl overflow-hidden shadow-2xl"
+              style={{ background:'rgba(11,14,24,0.99)', border:'1px solid rgba(255,255,255,0.12)' }}>
+              <p className="px-3 py-2 text-[10px] font-bold text-white/25 uppercase tracking-widest border-b border-white/8">LCU</p>
+              <div className="max-h-44 overflow-y-auto">
+                {allLCUs.map((l) => (
+                  <button key={l.id} onClick={() => handleAssignLCU(l.id)}
+                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-blue-500/20 transition-colors text-left border-b border-white/4">
+                    <Radio size={9} className="text-blue-400 shrink-0" />
+                    <span className="text-[11px] font-mono text-white/75 flex-1 truncate">{l.reference || l.name}</span>
+                    {Number(l.id) === Number(lamp.lcu_id) && <span className="text-blue-400 text-[9px]">✓</span>}
+                  </button>
+                ))}
+                {lcu && (
+                  <button onClick={() => handleAssignLCU(null)}
+                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-red-500/15 transition-colors text-left">
+                    <X size={9} className="text-red-400" />
+                    <span className="text-[11px] text-red-400">Retirer</span>
+                  </button>
+                )}
+                {allLCUs.length === 0 && (
+                  <p className="text-[11px] text-white/25 px-3 py-2 text-center">Aucune LCU</p>
+                )}
+              </div>
             </div>
-          </div>
+          </>
         )}
       </div>
 
@@ -1347,6 +1347,7 @@ function LampCard({ lamp, lcu, allLCUs = [], onClose, flyTo, onUpdateIntensity, 
    LCU CARD (bottom panel)
 ───────────────────────────────────────────────────────────── */
 function LCUCard({ lcu, lamps, onClose, onSelect, flyTo, toggleLamp, toggleLCUGroup, applyGroupIntensity, togglingLamp, togglingLCU }) {
+  const navigate = useNavigate()
   const avgIntensity = lamps.length
     ? Math.round(lamps.reduce((s, l) => s + (l.intensite ?? 0), 0) / lamps.length)
     : 0
@@ -1399,6 +1400,22 @@ function LCUCard({ lcu, lamps, onClose, onSelect, flyTo, toggleLamp, toggleLCUGr
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all disabled:opacity-30"
           style={{ background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.35)', color:'#ef4444' }}>
           <PowerOff size={11} /> Éteindre tout
+        </button>
+        <button
+          onClick={() => {
+            const params = new URLSearchParams({
+              create: '1',
+              target_type: 'lcu',
+              target_value: lcu.reference || lcu.name || '',
+              zone: lcu.zone || '',
+              name: `Profil ${lcu.reference || lcu.name}`,
+            })
+            navigate(`/profiles?${params.toString()}`)
+          }}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all"
+          style={{ background:'rgba(139,92,246,0.15)', border:'1px solid rgba(139,92,246,0.4)', color:'#a78bfa' }}
+          title="Créer un profil d'éclairage pour cette LCU">
+          <Workflow size={11} /> Profil
         </button>
         {lcu.latitude && lcu.longitude && (
           <button onClick={() => flyTo(lcu.latitude, lcu.longitude, 16)}

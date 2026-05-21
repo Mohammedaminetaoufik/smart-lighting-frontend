@@ -7,7 +7,17 @@ export const assignWorkOrder = (id, data) => client.post(`/workorders/${id}/assi
 export const startWorkOrder = (id) => client.post(`/workorders/${id}/start`)
 export const resolveWorkOrder = (id, data) => client.post(`/workorders/${id}/resolve`, data)
 export const closeWorkOrder = (id) => client.post(`/workorders/${id}/close`)
+export const cancelWorkOrder = (id, data) => client.post(`/workorders/${id}/cancel`, data)
 export const createWorkOrdersFromAlerts = (data) => client.post('/workorders/from-alerts', data)
+export const getWorkOrderAlerts = (id) => client.get(`/workorders/${id}/alerts`)
+export const getWorkOrderInterventions = (id) => client.get(`/workorders/${id}/interventions`)
+export const createWorkOrderIntervention = (id, data) => client.post(`/workorders/${id}/interventions`, data)
+
+export const getOpenWorkOrders = () => client.get('/workorders/open')
+export const acceptWorkOrder = (id, data) => client.post(`/workorders/${id}/accept`, data)
+export const addWorkOrderNote = (id, data) => client.post(`/workorders/${id}/add-note`, data)
+export const reopenWorkOrder = (id, data) => client.post(`/workorders/${id}/reopen`, data)
+export const getWorkOrderLogs = (id) => client.get(`/workorders/${id}/logs`)
 
 export const getInterventions = (params) => client.get('/interventions', { params })
 export const createIntervention = (data) => client.post('/interventions', data)

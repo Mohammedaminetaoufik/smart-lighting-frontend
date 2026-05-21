@@ -3,6 +3,7 @@ import client from './client'
 export const getLampadaires = (params) => client.get('/lampadaires', { params })
 export const importLampadaires = (rows) => client.post('/lampadaires/import', { rows })
 export const getLampadaire = (id) => client.get(`/lampadaires/${id}`)
+export const patchLampadaire = (id, data) => client.patch(`/lampadaires/${id}`, data)
 export const getMissingLocation = () => client.get('/lampadaires/missing-location')
 export const updateLocation = (id, data) => client.post(`/lampadaires/${id}/location`, data)
 export const updateCommissioning = (id, data) => client.post(`/lampadaires/${id}/commissioning`, data)
