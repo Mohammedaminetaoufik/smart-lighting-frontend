@@ -254,6 +254,7 @@ export default function MapPage() {
   const [newLCUForm,  setNewLCUForm]  = useState({ reference:'', name:'', ip_address:'', port:'8080', zone:'' })
   const [savingLCU,   setSavingLCU]   = useState(false)
   const mapRef = useRef(null)
+  const [activeTab, setActiveTab] = useState('network')
 
   const flyTo = useCallback((lat, lng, zoom = 18) => {
     mapRef.current?.flyTo([lat, lng], zoom, { animate: true, duration: 0.8 })
@@ -667,226 +668,256 @@ export default function MapPage() {
             </div>
           </div>
 
-          {/* Status filters */}
-          <div className="px-4 py-3 border-b border-white/8">
-            <p className="text-[10px] font-semibold text-white/40 uppercase tracking-widest mb-2">Filtres état</p>
-            <div className="space-y-1">
-              {Object.entries(STATUS).map(([key, s]) => {
-                const count = lamps.filter((l) => l.etat === key).length
-                return (
-                  <button key={key} onClick={() => setFilters((f) => ({ ...f, [key]: !f[key] }))}
-                    className={cn(
-                      'w-full flex items-center gap-2.5 px-3 py-2 rounded-xl transition-all text-left',
-                      filters[key] ? 'bg-white/8' : 'opacity-40'
-                    )}>
-                    <div className={cn('w-3 h-3 rounded-full border-2 transition-all',
-                      filters[key] ? 'border-transparent' : 'border-white/40 bg-transparent')}
-                      style={filters[key] ? { background: s.hex } : {}} />
-                    <span className="text-[12px] font-medium text-white/80 flex-1">{s.label}</span>
-                    <span className="text-[11px] font-bold px-2 py-0.5 rounded-full"
-                      style={{ background: `${s.hex}22`, color: s.hex }}>{count}</span>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-
-          {/* Layer toggles */}
-          <div className="px-4 py-3 border-b border-white/8">
-            <p className="text-[10px] font-semibold text-white/40 uppercase tracking-widest mb-2">Couches</p>
-            <div className="space-y-1">
-              {[
-                { label: 'Zones de couverture', key: 'zones', val: showZones, set: setShowZones, color: '#3b82f6' },
-                { label: 'Lignes de connexion', key: 'lines', val: showLines, set: setShowLines, color: '#6366f1' },
-              ].map((t) => (
-                <button key={t.key} onClick={() => t.set((v) => !v)}
-                  className={cn(
-                    'w-full flex items-center gap-2.5 px-3 py-2 rounded-xl transition-all text-left',
-                    t.val ? 'bg-white/8' : 'opacity-40'
-                  )}>
-                  <div className={cn('w-3 h-3 rounded-sm border-2 transition-all shrink-0',
-                    t.val ? 'border-transparent' : 'border-white/40 bg-transparent')}
-                    style={t.val ? { background: t.color } : {}} />
-                  <span className="text-[12px] font-medium text-white/80 flex-1">{t.label}</span>
-                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-full transition-all"
-                    style={t.val
-                      ? { background: `${t.color}22`, color: t.color }
-                      : { background: 'rgba(255,255,255,0.07)', color: 'rgba(255,255,255,0.2)' }}>
-                    {t.val ? 'ON' : 'OFF'}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Tile selector */}
-          <div className="px-4 py-3 border-b border-white/8">
-            <p className="text-[10px] font-semibold text-white/40 uppercase tracking-widest mb-2">Fond de carte</p>
-            <div className="flex gap-1.5">
-              {Object.keys(TILES).map((k) => (
-                <button key={k} onClick={() => setTile(k)}
-                  className={cn(
-                    'flex-1 py-1.5 rounded-lg text-[11px] font-medium transition-all',
-                    tile === k ? 'bg-brand-500 text-white' : 'bg-white/8 text-white/50 hover:bg-white/14'
-                  )}>{k}</button>
-              ))}
-            </div>
-          </div>
-
-          {/* Missing location section */}
-          {missing.length > 0 && (
-            <div className="px-4 py-3 border-b border-white/8">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-[10px] font-semibold text-white/40 uppercase tracking-widest">Non localisés</p>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-yellow-400/20 text-yellow-400">
-                  {missing.length}
-                </span>
-              </div>
-              <button
-                onClick={() => startPlacing(missing)}
-                className="w-full flex items-center justify-center gap-2 py-2 rounded-xl text-[12px] font-semibold transition-all"
-                style={{ background:'rgba(234,179,8,0.15)', border:'1px solid rgba(234,179,8,0.35)', color:'#fde047' }}>
-                <LocateFixed size={13} />
-                Localiser tous ({missing.length})
+          {/* Tab navigation */}
+          <div className="flex border-b border-white/8 shrink-0">
+            {[{ key: 'controls', label: 'Carte' }, { key: 'network', label: 'Réseau' }].map((t) => (
+              <button key={t.key} onClick={() => setActiveTab(t.key)}
+                className={cn(
+                  'flex-1 py-2.5 text-[12px] font-semibold transition-all relative',
+                  activeTab === t.key ? 'text-white' : 'text-white/35 hover:text-white/60'
+                )}>
+                {t.label}
+                {activeTab === t.key && (
+                  <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-8 h-[2px] rounded-full bg-brand-500" />
+                )}
               </button>
-              <div className="mt-2 space-y-0.5 max-h-32 overflow-y-auto">
-                {missing.map((lamp) => (
-                  <div key={lamp.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/6 group">
-                    <MapPin size={11} className="text-yellow-400/70 shrink-0" />
-                    <span className="text-[11px] font-mono text-white/60 flex-1 truncate">{lamp.reference}</span>
-                    <button
-                      onClick={() => startPlacing([lamp])}
-                      className="opacity-0 group-hover:opacity-100 text-[10px] text-yellow-400 hover:text-yellow-300 transition-all font-medium">
-                      Placer
-                    </button>
+            ))}
+          </div>
+
+          <div className="flex-1 overflow-y-auto">
+
+            {/* ── Carte tab ── */}
+            {activeTab === 'controls' && (
+              <div className="px-4 py-4 space-y-5">
+
+                {/* Status filters */}
+                <div>
+                  <p className="text-[10px] font-semibold text-white/35 uppercase tracking-widest mb-3">Filtrer par état</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {Object.entries(STATUS).map(([key, s]) => {
+                      const count = lamps.filter((l) => l.etat === key).length
+                      return (
+                        <button key={key} onClick={() => setFilters((f) => ({ ...f, [key]: !f[key] }))}
+                          className={cn(
+                            'flex flex-col items-center gap-1.5 py-3 rounded-xl border transition-all',
+                            filters[key] ? 'bg-white/6 border-white/10' : 'bg-transparent border-white/5 opacity-30'
+                          )}>
+                          <span className="w-2.5 h-2.5 rounded-full"
+                            style={{ background: s.hex, boxShadow: filters[key] ? `0 0 8px ${s.hex}80` : 'none' }} />
+                          <span className="text-[17px] font-bold leading-none" style={{ color: s.hex }}>{count}</span>
+                          <span className="text-[9px] text-white/45">{s.label}</span>
+                        </button>
+                      )
+                    })}
                   </div>
-                ))}
-              </div>
-            </div>
-          )}
+                </div>
 
-          {/* LCU control section */}
-          {visibleLCUs.length > 0 && (
-            <div className="px-3 py-2 border-b border-white/8">
-              <p className="text-[10px] font-semibold text-white/40 uppercase tracking-widest px-1 mb-1.5">
-                {visibleLCUs.length} passerelles LCU
-              </p>
-              {visibleLCUs.map((lcu) => {
-                const isSelected = selected?.type === 'lcu' && selected.data.id === lcu.id
-                const group = lampsByLCU[lcu.id] || []
-                const count = group.length
-                const isExpanded = expandedLCU === lcu.id
-                const isGroupToggling = togglingLCU.has(lcu.id)
-                const allOn  = count > 0 && group.every((l) => (l.intensite ?? 0) > 0)
-                const allOff = count > 0 && group.every((l) => (l.intensite ?? 0) === 0)
-                return (
-                  <div key={`lcu-side-${lcu.id}`} className="mb-0.5">
-                    {/* LCU row */}
-                    <div className={cn(
-                      'group flex items-center gap-1.5 px-2 py-1.5 rounded-xl transition-all',
-                      isSelected ? 'bg-blue-500/15' : 'hover:bg-white/6'
-                    )}>
-                      <Radio size={11} className="text-blue-400 shrink-0" />
-                      <button
-                        onClick={() => { setSelected({ type:'lcu', data:lcu }) }}
-                        className="flex-1 text-left min-w-0">
-                        <span className="text-[12px] font-medium text-white/80 truncate block">
-                          {lcu.reference || lcu.name}
-                        </span>
-                      </button>
-                      <span className="text-[10px] text-blue-400/50 shrink-0">{count}</span>
-                      {/* Eye */}
-                      <button onClick={() => { setSelected({ type:'lcu', data:lcu }); flyTo(lcu.latitude, lcu.longitude, 16) }}
-                        className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-white/10 text-white/30 hover:text-blue-400 transition-all"
-                        title="Centrer"><Eye size={10} /></button>
-                      {/* ON */}
-                      <button
-                        onClick={() => toggleLCUGroup(lcu, true, group)}
-                        disabled={isGroupToggling || allOn}
-                        className="px-1.5 py-0.5 rounded text-[10px] font-bold transition-all disabled:opacity-30"
-                        style={{ background:'rgba(34,197,94,0.15)', border:'1px solid rgba(34,197,94,0.35)', color:'#22c55e' }}
-                        title="Allumer tout le groupe">ON</button>
-                      {/* OFF */}
-                      <button
-                        onClick={() => toggleLCUGroup(lcu, false, group)}
-                        disabled={isGroupToggling || allOff}
-                        className="px-1.5 py-0.5 rounded text-[10px] font-bold transition-all disabled:opacity-30"
-                        style={{ background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.3)', color:'#ef4444' }}
-                        title="Éteindre tout le groupe">OFF</button>
-                      {/* Expand */}
-                      <button
-                        onClick={() => setExpandedLCU((v) => v === lcu.id ? null : lcu.id)}
-                        className="p-1 rounded hover:bg-white/10 text-white/30 hover:text-white transition-all">
-                        {isExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
-                      </button>
-                    </div>
-
-                    {/* Expanded lamp list */}
-                    {isExpanded && (
-                      <div className="ml-4 mt-0.5 mb-1 space-y-0.5 max-h-40 overflow-y-auto">
-                        {group.length === 0 && (
-                          <p className="text-[10px] text-white/30 px-2 py-1">Aucun lampadaire</p>
-                        )}
-                        {group.map((lamp) => {
-                          const hex = STATUS[lamp.etat]?.hex || '#6b7280'
-                          const isOn = (lamp.intensite ?? 0) > 0
-                          const isToggling = togglingLamp.has(lamp.id)
-                          return (
-                            <div key={`exp-${lamp.id}`}
-                              className="flex items-center gap-1.5 px-2 py-1 rounded-lg hover:bg-white/6 group/lamp">
-                              <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: hex }} />
-                              <button
-                                onClick={() => { setSelected({ type:'lamp', data:lamp }); flyTo(lamp.latitude, lamp.longitude) }}
-                                className="flex-1 text-left min-w-0">
-                                <span className="text-[11px] font-mono text-white/70 truncate block">{lamp.reference}</span>
-                              </button>
-                              <span className="text-[10px]" style={{ color: hex }}>{lamp.intensite ?? 0}%</span>
-                              <LampToggle lamp={lamp} onToggle={toggleLamp} disabled={isToggling} size="xs" />
-                            </div>
-                          )
-                        })}
+                {/* Layer toggles */}
+                <div>
+                  <p className="text-[10px] font-semibold text-white/35 uppercase tracking-widest mb-1">Couches de carte</p>
+                  {[
+                    { label: 'Zones de couverture', key: 'zones', val: showZones, set: setShowZones },
+                    { label: 'Lignes de connexion', key: 'lines', val: showLines, set: setShowLines },
+                  ].map((t) => (
+                    <div key={t.key} onClick={() => t.set((v) => !v)}
+                      className="flex items-center justify-between py-2.5 border-b border-white/5 last:border-0 cursor-pointer">
+                      <span className={cn('text-[12px] transition-colors', t.val ? 'text-white/75' : 'text-white/35')}>
+                        {t.label}
+                      </span>
+                      <div className={cn('relative w-9 h-5 rounded-full transition-colors shrink-0',
+                        t.val ? 'bg-brand-500' : 'bg-white/15')}>
+                        <span className={cn(
+                          'absolute top-[3px] w-[14px] h-[14px] rounded-full bg-white shadow-sm transition-transform duration-200 left-[3px]',
+                          t.val ? 'translate-x-[16px]' : 'translate-x-0'
+                        )} />
                       </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Tile selector */}
+                <div>
+                  <p className="text-[10px] font-semibold text-white/35 uppercase tracking-widest mb-2">Fond de carte</p>
+                  <div className="flex gap-1 p-1 rounded-xl bg-white/5">
+                    {Object.keys(TILES).map((k) => (
+                      <button key={k} onClick={() => setTile(k)}
+                        className={cn(
+                          'flex-1 py-1.5 rounded-lg text-[11px] font-medium transition-all',
+                          tile === k ? 'bg-brand-500 text-white' : 'text-white/45 hover:text-white/70'
+                        )}>{k}</button>
+                    ))}
+                  </div>
+                </div>
+
+              </div>
+            )}
+
+            {/* ── Réseau tab ── */}
+            {activeTab === 'network' && (
+              <div className="py-3">
+
+                {/* Missing lamps */}
+                {missing.length > 0 && (
+                  <div className="mx-3 mb-3 rounded-xl p-3"
+                    style={{ background: 'rgba(234,179,8,0.07)', border: '1px solid rgba(234,179,8,0.18)' }}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <MapPin size={11} className="text-yellow-400" />
+                      <span className="text-[11px] font-semibold text-yellow-300 flex-1">Non localisés</span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-yellow-400/20 text-yellow-400">
+                        {missing.length}
+                      </span>
+                    </div>
+                    <button onClick={() => startPlacing(missing)}
+                      className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all"
+                      style={{ background:'rgba(234,179,8,0.1)', border:'1px solid rgba(234,179,8,0.28)', color:'#fde047' }}>
+                      <LocateFixed size={11} /> Localiser tous ({missing.length})
+                    </button>
+                    <div className="mt-1.5 space-y-0.5 max-h-24 overflow-y-auto">
+                      {missing.map((lamp) => (
+                        <div key={lamp.id} className="flex items-center gap-2 px-1 py-1 rounded-lg hover:bg-yellow-400/8 group">
+                          <span className="text-[10px] font-mono text-white/45 flex-1 truncate">{lamp.reference}</span>
+                          <button onClick={() => startPlacing([lamp])}
+                            className="opacity-0 group-hover:opacity-100 text-[10px] text-yellow-400 transition-all font-medium">
+                            Placer
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* LCU section */}
+                {visibleLCUs.length > 0 && (
+                  <div className="px-3 mb-3">
+                    <div className="flex items-center gap-2 px-1 mb-2">
+                      <Radio size={10} className="text-blue-400" />
+                      <span className="text-[10px] font-semibold text-white/35 uppercase tracking-widest flex-1">Passerelles LCU</span>
+                      <span className="text-[11px] font-bold text-blue-400">{visibleLCUs.length}</span>
+                    </div>
+                    <div className="space-y-1.5">
+                      {visibleLCUs.map((lcu) => {
+                        const isSelected = selected?.type === 'lcu' && selected.data.id === lcu.id
+                        const group = lampsByLCU[lcu.id] || []
+                        const count = group.length
+                        const isExpanded = expandedLCU === lcu.id
+                        const isGroupToggling = togglingLCU.has(lcu.id)
+                        const allOn  = count > 0 && group.every((l) => (l.intensite ?? 0) > 0)
+                        const allOff = count > 0 && group.every((l) => (l.intensite ?? 0) === 0)
+                        const litCount = group.filter((l) => (l.intensite ?? 0) > 0).length
+                        return (
+                          <div key={`lcu-side-${lcu.id}`}
+                            className={cn('rounded-xl overflow-hidden transition-all',
+                              isSelected ? 'ring-1 ring-blue-500/40 bg-blue-500/8' : 'bg-white/4'
+                            )}>
+                            {/* LCU name row */}
+                            <div className="flex items-center gap-2 px-3 py-2.5">
+                              <Radio size={10} className="text-blue-400/60 shrink-0" />
+                              <button onClick={() => setSelected({ type:'lcu', data:lcu })}
+                                className="flex-1 text-left min-w-0">
+                                <span className="text-[12px] font-semibold text-white/80 truncate block">
+                                  {lcu.reference || lcu.name}
+                                </span>
+                              </button>
+                              <span className="text-[10px] shrink-0">
+                                <span className="text-green-400 font-bold">{litCount}</span>
+                                <span className="text-white/25">/{count}</span>
+                              </span>
+                              <button onClick={() => { setSelected({ type:'lcu', data:lcu }); flyTo(lcu.latitude, lcu.longitude, 16) }}
+                                className="p-1 rounded hover:bg-white/10 text-white/20 hover:text-blue-400 transition-colors shrink-0"
+                                title="Centrer"><Eye size={10} /></button>
+                              <button onClick={() => setExpandedLCU((v) => v === lcu.id ? null : lcu.id)}
+                                className="p-1 rounded hover:bg-white/10 text-white/20 hover:text-white transition-colors shrink-0">
+                                {isExpanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+                              </button>
+                            </div>
+                            {/* Group controls */}
+                            <div className="flex gap-1.5 px-3 pb-2.5">
+                              <button onClick={() => toggleLCUGroup(lcu, true, group)}
+                                disabled={isGroupToggling || allOn}
+                                className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-[10px] font-bold transition-all disabled:opacity-25"
+                                style={{ background:'rgba(34,197,94,0.1)', border:'1px solid rgba(34,197,94,0.25)', color:'#22c55e' }}>
+                                <Power size={9} /> Allumer
+                              </button>
+                              <button onClick={() => toggleLCUGroup(lcu, false, group)}
+                                disabled={isGroupToggling || allOff}
+                                className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-[10px] font-bold transition-all disabled:opacity-25"
+                                style={{ background:'rgba(239,68,68,0.07)', border:'1px solid rgba(239,68,68,0.2)', color:'#ef4444' }}>
+                                <PowerOff size={9} /> Éteindre
+                              </button>
+                            </div>
+                            {/* Expanded lamp rows */}
+                            {isExpanded && (
+                              <div className="border-t border-white/6 px-3 py-2 space-y-0.5 max-h-40 overflow-y-auto">
+                                {group.length === 0 ? (
+                                  <p className="text-[10px] text-white/25 text-center py-2">Aucun lampadaire</p>
+                                ) : group.map((lamp) => {
+                                  const hex = STATUS[lamp.etat]?.hex || '#6b7280'
+                                  const isToggling = togglingLamp.has(lamp.id)
+                                  return (
+                                    <div key={`exp-${lamp.id}`}
+                                      className="flex items-center gap-2 py-1.5 px-1 rounded-lg hover:bg-white/5">
+                                      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: hex }} />
+                                      <button onClick={() => { setSelected({ type:'lamp', data:lamp }); flyTo(lamp.latitude, lamp.longitude) }}
+                                        className="flex-1 text-left min-w-0">
+                                        <span className="text-[11px] font-mono text-white/60 truncate block">{lamp.reference}</span>
+                                      </button>
+                                      <span className="text-[10px]" style={{ color: (lamp.intensite ?? 0) > 0 ? '#22c55e' : '#6b7280' }}>
+                                        {lamp.intensite ?? 0}%
+                                      </span>
+                                      <LampToggle lamp={lamp} onToggle={toggleLamp} disabled={isToggling} size="xs" />
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Lamp list */}
+                <div className="px-3">
+                  <div className="flex items-center gap-2 px-1 mb-2">
+                    <Zap size={10} className="text-yellow-400/60" />
+                    <span className="text-[10px] font-semibold text-white/35 uppercase tracking-widest flex-1">Lampadaires</span>
+                    <span className="text-[11px] font-bold text-white/35">{filtered.length}</span>
+                  </div>
+                  <div className="space-y-0.5">
+                    {filtered.slice(0, 80).map((lamp) => {
+                      const isSelected = selected?.type === 'lamp' && selected.data.id === lamp.id
+                      const s = STATUS[lamp.etat]
+                      const isToggling = togglingLamp.has(lamp.id)
+                      return (
+                        <div key={lamp.id}
+                          className={cn(
+                            'group flex items-center gap-2 px-2.5 py-2 rounded-xl transition-all cursor-pointer',
+                            isSelected ? 'bg-white/12' : 'hover:bg-white/6'
+                          )}
+                          onClick={() => setSelected({ type:'lamp', data:lamp })}>
+                          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: s?.hex }} />
+                          <span className="text-[11px] font-mono text-white/70 flex-1 truncate">{lamp.reference}</span>
+                          {lamp.has_critical_alert && <AlertTriangle size={10} className="text-red-400 shrink-0" />}
+                          <span className="text-[10px] text-white/30 shrink-0">{lamp.intensite ?? 0}%</span>
+                          <button onClick={(e) => { e.stopPropagation(); setSelected({ type:'lamp', data:lamp }); flyTo(lamp.latitude, lamp.longitude) }}
+                            className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-white/10 text-white/25 hover:text-white transition-all shrink-0"
+                            title="Zoomer"><Eye size={10} /></button>
+                          <div onClick={(e) => e.stopPropagation()}>
+                            <LampToggle lamp={lamp} onToggle={toggleLamp} disabled={isToggling} size="xs" />
+                          </div>
+                        </div>
+                      )
+                    })}
+                    {filtered.length > 80 && (
+                      <p className="text-[10px] text-white/25 text-center py-2">+{filtered.length - 80} autres</p>
                     )}
                   </div>
-                )
-              })}
-            </div>
-          )}
-
-          {/* Lamp list */}
-          <div className="flex-1 overflow-y-auto px-3 py-2">
-            <p className="text-[10px] font-semibold text-white/40 uppercase tracking-widest px-1 mb-1.5">
-              {filtered.length} lampadaires
-            </p>
-            {filtered.slice(0, 80).map((lamp) => {
-              const isSelected = selected?.type === 'lamp' && selected.data.id === lamp.id
-              const s = STATUS[lamp.etat]
-              const isOn = (lamp.intensite ?? 0) > 0
-              const isToggling = togglingLamp.has(lamp.id)
-              return (
-                <div key={lamp.id}
-                  className={cn(
-                    'group flex items-center gap-1.5 px-2 py-1.5 rounded-xl mb-0.5 transition-all',
-                    isSelected ? 'bg-white/12' : 'hover:bg-white/6'
-                  )}>
-                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: s?.hex }} />
-                  <button
-                    onClick={() => setSelected({ type:'lamp', data:lamp })}
-                    className="flex-1 flex items-center gap-1 text-left min-w-0">
-                    <span className="text-[11px] font-mono font-medium text-white/80 flex-1 truncate">{lamp.reference}</span>
-                    {lamp.has_critical_alert && <AlertTriangle size={10} className="text-red-400 shrink-0" />}
-                  </button>
-                  <span className="text-[10px] text-white/35 shrink-0">{lamp.intensite ?? 0}%</span>
-                  <button onClick={() => { setSelected({ type:'lamp', data:lamp }); flyTo(lamp.latitude, lamp.longitude) }}
-                    className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-white/10 text-white/30 hover:text-white transition-all"
-                    title="Zoomer"><Eye size={10} /></button>
-                  <LampToggle lamp={lamp} onToggle={toggleLamp} disabled={isToggling} size="xs" />
                 </div>
-              )
-            })}
-            {filtered.length > 80 && (
-              <p className="text-[10px] text-white/30 text-center py-2">+ {filtered.length - 80} autres</p>
+
+              </div>
             )}
+
           </div>
         </div>
 
