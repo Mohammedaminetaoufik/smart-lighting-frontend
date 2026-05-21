@@ -37,6 +37,7 @@ const STATUS_FILTERS = [
 ]
 
 const STATUS_COLOR = {
+  created:       'bg-[var(--surface-2)] text-[var(--text-muted)]',
   open:          'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300',
   accepted:      'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300',
   in_progress:   'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
@@ -47,6 +48,7 @@ const STATUS_COLOR = {
 }
 
 const STATUS_LABEL = {
+  created:       'Ouvert',
   open:          'Ouvert',
   accepted:      'Accepté',
   in_progress:   'En cours',
@@ -75,7 +77,7 @@ const TEAM_ICON = {
   inspection: Eye,
 }
 
-const SOURCE_LABEL = { alert: 'Alerte', manual: 'Manuel', system: 'Système' }
+const SOURCE_LABEL = { alert: 'Alerte', manual: 'Manuel', system: 'Système', calculator: 'Calculateur', maintenance_window: 'Maintenance' }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -466,7 +468,7 @@ function WODetailPanel({ woId, onClose, users, onAction, actionBusy, onAssign })
       {/* Footer actions */}
       {wo && (
         <div className="border-t border-[var(--border)] p-3 flex flex-wrap gap-2">
-          {wo.status === 'open' && (
+          {(wo.status === 'open' || wo.status === 'created') && (
             <>
               <Button size="sm" variant="primary" onClick={() => onAssign(wo)}>
                 <UserCheck size={13} /> Assigner
@@ -645,16 +647,17 @@ export default function WorkOrdersPage() {
     onError: (e) => toast.error(e.message),
   })
 
-  // Filter logic
+  // Filter logic — 'created' is treated as 'open' (legacy initial status)
   const filtered = workorders.filter((wo) => {
     if (!filterStatus) return true
     if (filterStatus === 'urgent') return wo.priority === 'urgent'
+    if (filterStatus === 'open') return wo.status === 'open' || wo.status === 'created'
     return wo.status === filterStatus
   })
 
   // Stats
   const stats = {
-    open:       workorders.filter((w) => w.status === 'open').length,
+    open:       workorders.filter((w) => w.status === 'open' || w.status === 'created').length,
     accepted:   workorders.filter((w) => w.status === 'accepted').length,
     in_progress:workorders.filter((w) => w.status === 'in_progress').length,
     urgent:     workorders.filter((w) => w.priority === 'urgent' && !['closed','cancelled','resolved'].includes(w.status)).length,
