@@ -1,4 +1,5 @@
-import { Lightbulb, Wifi, WifiOff, Wrench, Bell, Zap, Play, RefreshCw, AlertTriangle, TrendingUp, ArrowRight, FlaskConical } from 'lucide-react'
+import { useState } from 'react'
+import { Lightbulb, Wifi, WifiOff, Wrench, Bell, Zap, Play, RefreshCw, AlertTriangle, TrendingUp, ArrowRight, FlaskConical, X, MapPin } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
@@ -12,6 +13,7 @@ import Button from '../../components/ui/Button'
 import { PageLoader } from '../../components/ui/Spinner'
 import { getStats, getNetworkHealth, getEnergySummary, getDailyEnergy } from '../../api/dashboard'
 import { getAlerts, getAlertCounts } from '../../api/alerts'
+import { getLampadaires } from '../../api/lampadaires'
 import { runAllCalculator } from '../../api/calculator'
 import { QK } from '../../lib/queryClient'
 import { severityColor, labelSeverity, timeAgo } from '../../utils/helpers'
@@ -348,10 +350,210 @@ function EnergyChart({ daily, energy }) {
   )
 }
 
+/* ── Stat detail modal ────────────────────────────────────── */
+const STATUS_COLOR = { online: '#22c55e', offline: '#ef4444', maintenance: '#f59e0b' }
+const STATUS_LABEL = { online: 'En ligne', offline: 'Hors ligne', maintenance: 'Maintenance' }
+
+function StatDetailModal({ type, stats, alertCounts, energy, daily, allAlerts, lamps, onClose }) {
+  const titles = {
+    total:       { label: 'Tous les lampadaires',    icon: Lightbulb, color: 'text-brand-500',  bg: 'bg-brand-500/10' },
+    online:      { label: 'Lampadaires en ligne',    icon: Wifi,      color: 'text-green-500',  bg: 'bg-green-500/10' },
+    offline:     { label: 'Lampadaires hors ligne',  icon: WifiOff,   color: 'text-red-500',    bg: 'bg-red-500/10'   },
+    maintenance: { label: 'En maintenance',          icon: Wrench,    color: 'text-amber-500',  bg: 'bg-amber-500/10' },
+    alerts:      { label: 'Alertes ouvertes',        icon: Bell,      color: 'text-blue-500',   bg: 'bg-blue-500/10'  },
+    energy:      { label: "Énergie aujourd'hui",     icon: Zap,       color: 'text-slate-500',  bg: 'bg-slate-500/10' },
+  }
+  const meta = titles[type]
+  const Icon = meta.icon
+
+  // Filter lamps by status for relevant tabs
+  const lampList = (() => {
+    if (!Array.isArray(lamps)) return []
+    if (type === 'total')       return lamps
+    if (type === 'online')      return lamps.filter((l) => l.etat === 'online')
+    if (type === 'offline')     return lamps.filter((l) => l.etat === 'offline')
+    if (type === 'maintenance') return lamps.filter((l) => l.etat === 'maintenance')
+    return []
+  })()
+
+  const todayKwh   = Array.isArray(daily) && daily.length > 0 ? daily[daily.length - 1].kwh : 0
+  const totalKwh   = Array.isArray(daily) ? daily.reduce((s, d) => s + (d.kwh ?? 0), 0) : 0
+  const currentW   = energy?.estimated_current_power_w ?? 0
+  const savingPct  = energy?.estimated_saving_percent  ?? 0
+  const savingW    = energy?.estimated_saving_w        ?? 0
+
+  return (
+    <div className="fixed inset-0 z-[800] flex items-center justify-center p-4" onClick={onClose}>
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+
+      {/* Panel */}
+      <div
+        className="relative z-10 w-full max-w-2xl max-h-[80vh] flex flex-col rounded-2xl shadow-2xl"
+        style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center gap-3 px-5 py-4 border-b shrink-0" style={{ borderColor: 'var(--border)' }}>
+          <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${meta.bg}`}>
+            <Icon size={17} className={meta.color} />
+          </div>
+          <p className="text-[15px] font-bold text-[var(--text)] flex-1">{meta.label}</p>
+          <button onClick={onClose}
+            className="p-1.5 rounded-lg hover:bg-[var(--surface-2)] text-[var(--text-muted)] transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="overflow-y-auto flex-1 px-5 py-4">
+
+          {/* Energy detail */}
+          {type === 'energy' && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { label: "Aujourd'hui",    value: `${todayKwh.toFixed(2)} kWh`,  color: 'var(--text)',  sub: 'Consommation du jour' },
+                  { label: '30 derniers j.', value: `${totalKwh.toFixed(1)} kWh`,  color: 'var(--text)',  sub: 'Total mensuel' },
+                  { label: 'Puissance act.', value: currentW >= 1000 ? `${(currentW/1000).toFixed(2)} kW` : `${Math.round(currentW)} W`, color: '#3b82f6', sub: 'Charge instantanée' },
+                  { label: 'Économies',      value: `${Math.round(savingPct)}%`,    color: '#22c55e',      sub: savingW >= 1000 ? `${(savingW/1000).toFixed(1)} kW économisés` : `${Math.round(savingW)} W économisés` },
+                ].map((kpi) => (
+                  <div key={kpi.label} className="rounded-xl p-4 border"
+                    style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}>
+                    <p className="text-[11px] text-[var(--text-muted)] mb-1">{kpi.label}</p>
+                    <p className="text-[26px] font-bold leading-none" style={{ color: kpi.color }}>{kpi.value}</p>
+                    <p className="text-[11px] text-[var(--text-muted)] mt-1">{kpi.sub}</p>
+                  </div>
+                ))}
+              </div>
+              {Array.isArray(daily) && daily.length > 0 && (
+                <div>
+                  <p className="text-[12px] font-semibold text-[var(--text)] mb-2">Historique (derniers 10 jours)</p>
+                  <div className="space-y-1.5">
+                    {daily.slice(-10).reverse().map((d) => {
+                      const maxKwh = Math.max(...daily.map((x) => x.kwh ?? 0), 1)
+                      const pct = Math.round(((d.kwh ?? 0) / maxKwh) * 100)
+                      return (
+                        <div key={d.date} className="flex items-center gap-3">
+                          <span className="text-[11px] font-mono text-[var(--text-muted)] w-14 shrink-0">{d.date?.slice(5)}</span>
+                          <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'var(--surface-2)' }}>
+                            <div className="h-full rounded-full bg-green-500" style={{ width: `${pct}%` }} />
+                          </div>
+                          <span className="text-[11px] font-semibold text-[var(--text)] w-16 text-right shrink-0">
+                            {(d.kwh ?? 0).toFixed(2)} kWh
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Alerts detail */}
+          {type === 'alerts' && (
+            <div className="space-y-3">
+              {/* Severity summary */}
+              <div className="grid grid-cols-3 gap-2 mb-4">
+                {[
+                  { label: 'Critiques',      value: alertCounts?.critical ?? 0, color: '#ef4444' },
+                  { label: 'Avertissements', value: alertCounts?.warning  ?? 0, color: '#f59e0b' },
+                  { label: 'Informations',   value: alertCounts?.info     ?? 0, color: '#3b82f6' },
+                ].map((s) => (
+                  <div key={s.label} className="rounded-xl px-3 py-3 text-center"
+                    style={{ background: `${s.color}12`, border: `1px solid ${s.color}25` }}>
+                    <p className="text-[24px] font-bold leading-none" style={{ color: s.color }}>{s.value}</p>
+                    <p className="text-[10px] uppercase tracking-wider mt-1" style={{ color: s.color, opacity: 0.7 }}>{s.label}</p>
+                  </div>
+                ))}
+              </div>
+              {/* Alert list */}
+              {Array.isArray(allAlerts) && allAlerts.length > 0 ? (
+                <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
+                  {allAlerts.map((a) => {
+                    const col = severityColor(a.severity)
+                    return (
+                      <div key={a.id} className="flex items-start gap-3 py-2.5">
+                        <span className="w-2 h-2 rounded-full mt-1 shrink-0" style={{ background: col.text }} />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <Badge label={labelSeverity(a.severity)} bg={col.bg} text={col.text} />
+                            {a.lampadaire_reference && (
+                              <span className="text-[11px] font-mono text-[var(--text-muted)]">{a.lampadaire_reference}</span>
+                            )}
+                          </div>
+                          <p className="text-[12px] text-[var(--text)] truncate">{a.message}</p>
+                        </div>
+                        <span className="text-[11px] text-[var(--text-muted)] shrink-0 whitespace-nowrap">{timeAgo(a.created_at)}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <p className="text-[12px] text-[var(--text-muted)] text-center py-6">Aucune alerte ouverte</p>
+              )}
+              <div className="pt-2">
+                <Link to="/alerts" onClick={onClose}
+                  className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-[12px] font-medium border transition-colors hover:bg-[var(--surface-2)]"
+                  style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
+                  Voir toutes les alertes <ArrowRight size={13} />
+                </Link>
+              </div>
+            </div>
+          )}
+
+          {/* Lamp list (total / online / offline / maintenance) */}
+          {['total', 'online', 'offline', 'maintenance'].includes(type) && (
+            <div>
+              <p className="text-[12px] text-[var(--text-muted)] mb-3">
+                {lampList.length} lampadaire{lampList.length !== 1 ? 's' : ''}
+                {type !== 'total' ? ` — ${STATUS_LABEL[type] || type}` : ''}
+              </p>
+              {lampList.length === 0 ? (
+                <p className="text-[12px] text-[var(--text-muted)] text-center py-8">Aucun lampadaire</p>
+              ) : (
+                <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
+                  {lampList.map((l) => {
+                    const hex = STATUS_COLOR[l.etat] || '#6b7280'
+                    return (
+                      <div key={l.id} className="flex items-center gap-3 py-2.5">
+                        <span className="w-2 h-2 rounded-full shrink-0" style={{ background: hex }} />
+                        <span className="text-[12px] font-mono font-semibold text-[var(--text)] w-24 shrink-0">{l.reference}</span>
+                        <span className="text-[11px] text-[var(--text-muted)] flex-1 truncate">{l.zone || '—'}</span>
+                        <span className="text-[11px] px-2 py-0.5 rounded-full shrink-0"
+                          style={{ background: `${hex}18`, color: hex }}>
+                          {STATUS_LABEL[l.etat] || l.etat}
+                        </span>
+                        <span className="text-[11px] text-[var(--text-muted)] w-10 text-right shrink-0">
+                          {l.intensite ?? 0}%
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              <div className="pt-3">
+                <Link to="/lampadaires" onClick={onClose}
+                  className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-[12px] font-medium border transition-colors hover:bg-[var(--surface-2)]"
+                  style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
+                  Voir tous les lampadaires <ArrowRight size={13} />
+                </Link>
+              </div>
+            </div>
+          )}
+
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /* ── Main dashboard ───────────────────────────────────────── */
 export default function DashboardPage() {
   const qc = useQueryClient()
   const refresh = () => qc.invalidateQueries()
+  const [modal, setModal] = useState(null)
 
   const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: QK.dashboard,
@@ -378,7 +580,20 @@ export default function DashboardPage() {
     queryFn: () => getDailyEnergy(30),
   })
 
-  const alerts = Array.isArray(alertsRes) ? alertsRes : alertsRes?.alerts || []
+  const { data: lampsRes } = useQuery({
+    queryKey: ['lampadaires-all'],
+    queryFn: getLampadaires,
+    enabled: ['total', 'online', 'offline', 'maintenance'].includes(modal),
+  })
+  const { data: allAlertsRes } = useQuery({
+    queryKey: ['alerts-all-open'],
+    queryFn: () => getAlerts({ status: 'open', limit: 200 }),
+    enabled: modal === 'alerts',
+  })
+
+  const lamps     = Array.isArray(lampsRes) ? lampsRes : lampsRes?.lampadaires || []
+  const allAlerts = Array.isArray(allAlertsRes) ? allAlertsRes : allAlertsRes?.alerts || []
+  const alerts    = Array.isArray(alertsRes) ? alertsRes : alertsRes?.alerts || []
 
   const runAllMut = useMutation({
     mutationFn: runAllCalculator,
@@ -413,17 +628,23 @@ export default function DashboardPage() {
       {/* ── KPI stat cards ────────────────────────────────── */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <StatCard icon={Lightbulb} label="Total lampadaires" value={total}
-          iconBg="bg-brand-500/10" iconColor="text-brand-500" />
+          iconBg="bg-brand-500/10" iconColor="text-brand-500"
+          onClick={() => setModal('total')} />
         <StatCard icon={Wifi}      label="En ligne"          value={online}
-          iconBg="bg-green-500/10" iconColor="text-green-500" />
+          iconBg="bg-green-500/10" iconColor="text-green-500"
+          onClick={() => setModal('online')} />
         <StatCard icon={WifiOff}   label="Hors ligne"        value={offline}
-          iconBg="bg-red-500/10"   iconColor="text-red-500" />
+          iconBg="bg-red-500/10"   iconColor="text-red-500"
+          onClick={() => setModal('offline')} />
         <StatCard icon={Wrench}    label="Maintenance"       value={maintenance}
-          iconBg="bg-amber-500/10" iconColor="text-amber-500" />
+          iconBg="bg-amber-500/10" iconColor="text-amber-500"
+          onClick={() => setModal('maintenance')} />
         <StatCard icon={Bell}      label="Alertes ouvertes"  value={alertCounts?.total ?? 0}
-          iconBg="bg-blue-500/10"  iconColor="text-blue-500" />
+          iconBg="bg-blue-500/10"  iconColor="text-blue-500"
+          onClick={() => setModal('alerts')} />
         <StatCard icon={Zap}       label="Énergie aujourd'hui" value={`${todayKwh.toFixed(1)} kWh`}
-          iconBg="bg-slate-500/10 dark:bg-slate-400/10" iconColor="text-slate-600 dark:text-slate-400" />
+          iconBg="bg-slate-500/10 dark:bg-slate-400/10" iconColor="text-slate-600 dark:text-slate-400"
+          onClick={() => setModal('energy')} />
       </div>
 
       {/* ── Energy chart ──────────────────────────────────── */}
@@ -527,6 +748,20 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
+
+      {/* ── Stat detail modal ─────────────────────────────── */}
+      {modal && (
+        <StatDetailModal
+          type={modal}
+          stats={stats}
+          alertCounts={alertCounts}
+          energy={energy}
+          daily={daily}
+          allAlerts={allAlerts}
+          lamps={lamps}
+          onClose={() => setModal(null)}
+        />
+      )}
     </div>
   )
 }

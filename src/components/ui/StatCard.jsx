@@ -1,8 +1,15 @@
 import { cn } from '../../utils/helpers'
 
-export default function StatCard({ icon: Icon, label, value, sub, iconBg = 'bg-brand-500/10', iconColor = 'text-brand-500', trend, className }) {
+export default function StatCard({ icon: Icon, label, value, sub, iconBg = 'bg-brand-500/10', iconColor = 'text-brand-500', trend, className, onClick }) {
   return (
-    <div className={cn('bg-[var(--surface)] border border-[var(--border)] rounded-xl p-5 flex items-start gap-4 shadow-card', className)}>
+    <div
+      onClick={onClick}
+      className={cn(
+        'bg-[var(--surface)] border border-[var(--border)] rounded-xl p-5 flex items-start gap-4 shadow-card transition-all',
+        onClick && 'cursor-pointer hover:border-[var(--brand,#6366f1)] hover:shadow-md',
+        className,
+      )}
+    >
       <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center shrink-0', iconBg)}>
         {Icon && <Icon size={20} className={iconColor} />}
       </div>
@@ -14,6 +21,9 @@ export default function StatCard({ icon: Icon, label, value, sub, iconBg = 'bg-b
           <p className={cn('text-[11px] font-medium mt-1', trend >= 0 ? 'text-green-500' : 'text-red-500')}>
             {trend >= 0 ? '↑' : '↓'} {Math.abs(trend)}% vs hier
           </p>
+        )}
+        {onClick && (
+          <p className="text-[10px] text-[var(--text-muted)] mt-1.5 opacity-50">Cliquer pour détails</p>
         )}
       </div>
     </div>
