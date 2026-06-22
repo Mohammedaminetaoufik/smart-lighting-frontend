@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Map, Radio, Lightbulb, Settings2,
   Bell, ClipboardList, FlaskConical, Users,
   CheckSquare, Workflow, BarChart3, Server, ShieldAlert, Activity, Clock,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, Sparkles,
 } from 'lucide-react'
 import { cn } from '../../utils/helpers'
 
@@ -21,6 +21,8 @@ const NAV = [
   { label: 'Maintenance', icon: Clock, to: '/maintenance' },
   { divider: true, group: 'Analyse' },
   { label: 'Énergie', icon: BarChart3, to: '/energy' },
+  { label: 'Centre de décision IA', icon: Activity, to: '/ai-center' },
+  { label: 'Assistant IA', icon: Sparkles, to: '/ai-assistant' },
   { divider: true, group: 'Administration' },
   { label: 'Utilisateurs', icon: Users, to: '/users' },
   { label: "Journal d'audit", icon: ShieldAlert, to: '/audit-log' },

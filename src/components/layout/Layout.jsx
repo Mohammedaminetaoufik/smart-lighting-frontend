@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Outlet } from 'react-router-dom'
+import { Outlet, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import Sidebar from './Sidebar'
 import Header from './Header'
+import ErrorBoundary from '../ui/ErrorBoundary'
 import { getAlertCounts } from '../../api/alerts'
 import { QK } from '../../lib/queryClient'
 
@@ -20,6 +21,7 @@ function useSidebarCollapsed() {
 export default function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [collapsed, toggleCollapsed] = useSidebarCollapsed()
+  const location = useLocation()
 
   const { data: counts } = useQuery({
     queryKey: QK.alertCounts,
@@ -44,7 +46,10 @@ export default function Layout() {
       >
         <Header onMenuClick={() => setMobileOpen(true)} alertCount={alertCount} />
         <main className="flex-1 overflow-auto p-4 lg:p-6">
-          <Outlet />
+          {/* key=pathname : un crash sur une page se réinitialise en naviguant */}
+          <ErrorBoundary key={location.pathname}>
+            <Outlet />
+          </ErrorBoundary>
         </main>
       </div>
     </div>

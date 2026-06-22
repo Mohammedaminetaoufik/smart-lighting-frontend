@@ -26,4 +26,6 @@ export const QK = {
   users:            ['users'],
   workorders:       ['workorders'],
   auditLogs:        (filters) => ['audit-logs', filters],
+  aiHistory:        ['ai-history'],
+  aiHealth:         ['ai-health'],
 }

@@ -14,6 +14,7 @@ import {
   cancelMaintenanceWindow,
   completeMaintenanceWindow,
   deleteMaintenanceWindow,
+  getMaintenanceWindowWorkOrders,
 } from '../../api/maintenance'
 import { getLCUs } from '../../api/lcus'
 import { getLampadaires } from '../../api/lampadaires'
@@ -658,11 +659,22 @@ function WindowForm({ draft, setDraft, step, setStep, onSubmit, loading }) {
 
 /* ─── Window Card ─────────────────────────────────────────────────── */
 
+const PRIORITY_COLORS_WEB = { critical: 'text-red-500', high: 'text-orange-500', medium: 'text-amber-500', low: 'text-green-500' }
+const WO_STATUS_LABELS = { open: 'Ouvert', created: 'Créé', accepted: 'Accepté', in_progress: 'En cours', resolved: 'Résolu', closed: 'Clos', cancelled: 'Annulé' }
+
 function WindowCard({ w, onCancel, onComplete, onDelete, onEdit }) {
   const [expanded, setExpanded] = useState(false)
   const isActive = w.status === 'active'
   const isPlanned = w.status === 'planned'
   const isDone = w.status === 'completed' || w.status === 'cancelled'
+
+  const { data: linkedWOs = [] } = useQuery({
+    queryKey: ['mw-workorders', w.id],
+    queryFn: () => getMaintenanceWindowWorkOrders(w.id),
+    enabled: expanded,
+    staleTime: 30_000,
+    select: (res) => Array.isArray(res) ? res : res?.data ?? [],
+  })
 
   return (
     <div className={cn(
@@ -735,7 +747,7 @@ function WindowCard({ w, onCancel, onComplete, onDelete, onEdit }) {
 
       {/* Expanded details */}
       {expanded && (
-        <div className="mt-3 pt-3 border-t border-[var(--border)] space-y-2">
+        <div className="mt-3 pt-3 border-t border-[var(--border)] space-y-3">
           {w.reason && (
             <p className="text-[12px] text-[var(--text)] italic">"{w.reason}"</p>
           )}
@@ -750,11 +762,6 @@ function WindowCard({ w, onCancel, onComplete, onDelete, onEdit }) {
                 <ShieldAlert size={10} /> OT automatiques bloqués
               </span>
             )}
-            {w.related_work_order_id && (
-              <span className="flex items-center gap-1 text-blue-500">
-                <ClipboardList size={10} /> OT lié #{w.related_work_order_id}
-              </span>
-            )}
             {w.created_by_name && (
               <span>Créée par {w.created_by_name}</span>
             )}
@@ -763,6 +770,33 @@ function WindowCard({ w, onCancel, onComplete, onDelete, onEdit }) {
             )}
             {w.completed_at && (
               <span className="text-green-400">Terminée le {formatDate(w.completed_at)}</span>
+            )}
+          </div>
+
+          {/* Bons de travail liés */}
+          <div>
+            <p className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wide mb-2 flex items-center gap-1">
+              <ClipboardList size={10} /> Bons de travail liés ({linkedWOs.length})
+            </p>
+            {linkedWOs.length === 0 ? (
+              <p className="text-[11px] text-[var(--text-muted)] italic">Aucun bon de travail lié.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {linkedWOs.map((wo) => (
+                  <div key={wo.id}
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--surface-2)] border border-[var(--border)]">
+                    <span className="text-[11px] font-medium text-[var(--text)] flex-1 truncate">
+                      #{wo.id} — {wo.title}
+                    </span>
+                    <span className={cn('text-[10px] font-semibold shrink-0', PRIORITY_COLORS_WEB[wo.priority])}>
+                      {wo.priority}
+                    </span>
+                    <span className="text-[10px] text-[var(--text-muted)] shrink-0">
+                      {WO_STATUS_LABELS[wo.status] ?? wo.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         </div>

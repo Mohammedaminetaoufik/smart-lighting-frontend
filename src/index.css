@@ -98,6 +98,12 @@
   }
 }
 
+/* ── AI typewriter cursor ──────────────────────────── */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
 /* ── Map marker animations ─────────────────────────── */
 @keyframes pulse-ring {
   0%   { transform: scale(0.8); opacity: 1; }

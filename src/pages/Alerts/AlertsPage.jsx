@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Bell, CheckCircle, XCircle, AlertTriangle, ChevronDown, ChevronUp,
-         Download, CheckCheck, RefreshCw, ClipboardList, Plus, ExternalLink } from 'lucide-react'
+         Download, CheckCheck, RefreshCw, ClipboardList, Plus, ExternalLink, MapPin, Radio } from 'lucide-react'
+import { BarChart, Bar, Cell, ResponsiveContainer, Tooltip as RTooltip } from 'recharts'
 import toast from 'react-hot-toast'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getAlerts, getAlertCounts, ackAlert, resolveAlert, closeAlert, createWorkOrderFromAlert } from '../../api/alerts'
+import { getAlerts, getAlertCounts, getAlertTimeline, ackAlert, resolveAlert, closeAlert, createWorkOrderFromAlert } from '../../api/alerts'
 import { bulkAlertAction } from '../../api/bulk'
 import { exportAlerts } from '../../api/export'
 import { QK } from '../../lib/queryClient'
@@ -12,8 +13,9 @@ import Card from '../../components/ui/Card'
 import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import BulkActionBar from '../../components/ui/BulkActionBar'
-import { PageLoader } from '../../components/ui/Spinner'
+import { TableSkeleton } from '../../components/ui/Skeleton'
 import { severityColor, labelSeverity, formatDate, timeAgo, cn } from '../../utils/helpers'
+import AIPageInsights from '../../components/ai/AIPageInsights'
 
 const SEVERITY_CARDS = {
   critical: { label: 'Critiques', icon: AlertTriangle, color: 'text-red-500', bg: 'bg-red-500/10' },
@@ -32,6 +34,72 @@ function WorkOrderBadge({ woId, onClick }) {
       <ClipboardList size={10} />
       Bon #{woId}
     </button>
+  )
+}
+
+// ── Live "last updated" banner with its own 1s ticker ─────────────────────────
+function LiveBanner({ dataUpdatedAt, isFetching }) {
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  const secsAgo = dataUpdatedAt ? Math.floor((Date.now() - dataUpdatedAt) / 1000) : 0
+  const label = secsAgo < 2 ? "à l'instant" : secsAgo < 60 ? `il y a ${secsAgo}s`
+    : `il y a ${Math.floor(secsAgo / 60)}min`
+
+  return (
+    <span className="inline-flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
+      <Radio size={11} className={cn('text-green-500', isFetching && 'animate-pulse')} />
+      <span className="hidden sm:inline">Temps réel · </span>
+      {isFetching ? 'mise à jour…' : `maj ${label}`}
+    </span>
+  )
+}
+
+// ── 24h alert sparkline ───────────────────────────────────────────────────────
+function AlertSparkline({ data }) {
+  if (!Array.isArray(data) || data.length === 0) return null
+  const total = data.reduce((s, b) => s + (b.count ?? 0), 0)
+  const peak  = Math.max(...data.map((b) => b.count ?? 0))
+
+  const SparkTooltip = ({ active, payload }) => {
+    if (!active || !payload?.length) return null
+    const b = payload[0].payload
+    return (
+      <div className="rounded-lg px-2.5 py-1.5 text-[11px] shadow-xl"
+        style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}>
+        <p className="text-[var(--text-muted)]">il y a {b.hours_ago}h</p>
+        <p className="font-bold">{b.count} alerte{b.count > 1 ? 's' : ''}</p>
+        {b.critical > 0 && <p className="text-red-400">{b.critical} critique{b.critical > 1 ? 's' : ''}</p>}
+      </div>
+    )
+  }
+
+  return (
+    <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-5">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <p className="text-[13px] font-semibold text-[var(--text)]">Activité des alertes</p>
+          <p className="text-[11px] text-[var(--text-muted)]">Nouvelles alertes sur 24h</p>
+        </div>
+        <div className="text-right">
+          <p className="text-[20px] font-bold text-[var(--text)] leading-none">{total}</p>
+          <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mt-0.5">sur 24h</p>
+        </div>
+      </div>
+      <ResponsiveContainer width="100%" height={70}>
+        <BarChart data={data} margin={{ top: 4, right: 0, left: 0, bottom: 0 }} barCategoryGap={2}>
+          <RTooltip content={<SparkTooltip />} cursor={{ fill: 'rgba(255,255,255,0.04)' }} />
+          <Bar dataKey="count" radius={[2, 2, 0, 0]}>
+            {data.map((b, i) => (
+              <Cell key={i} fill={b.critical > 0 ? '#ef4444' : b.count >= peak * 0.66 && peak > 0 ? '#f59e0b' : '#3b82f6'} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
   )
 }
 
@@ -55,17 +123,48 @@ export default function AlertsPage() {
     ...(filterSeverity && { severity: filterSeverity }),
   }
 
-  const { data: alertsRes, isLoading: alertsLoading, refetch } = useQuery({
+  const { data: alertsRes, isLoading: alertsLoading, isFetching, dataUpdatedAt, refetch } = useQuery({
     queryKey: QK.alerts(filters),
     queryFn: () => getAlerts(filters),
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
   })
 
   const { data: counts } = useQuery({
     queryKey: QK.alertCounts,
     queryFn: getAlertCounts,
+    refetchInterval: 15_000,
+  })
+
+  const { data: timeline = [] } = useQuery({
+    queryKey: ['alerts-timeline'],
+    queryFn: getAlertTimeline,
+    refetchInterval: 60_000,
   })
 
   const alerts = Array.isArray(alertsRes) ? alertsRes : alertsRes?.alerts || []
+
+  // Notify when new alerts arrive (compare open count between refreshes)
+  const prevOpenCount = useRef(null)
+  useEffect(() => {
+    const open = counts?.total ?? counts?.open ?? null
+    if (open === null) return
+    if (prevOpenCount.current !== null && open > prevOpenCount.current) {
+      const diff = open - prevOpenCount.current
+      toast(`${diff} nouvelle${diff > 1 ? 's' : ''} alerte${diff > 1 ? 's' : ''}`, {
+        icon: '🔔',
+        style: { background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)' },
+      })
+    }
+    prevOpenCount.current = open
+  }, [counts])
+
+  // Tick every 30s so "il y a X" timestamps stay live between refetches
+  const [, setNowTick] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setNowTick((t) => t + 1), 30_000)
+    return () => clearInterval(id)
+  }, [])
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['alerts'] })
@@ -120,6 +219,14 @@ export default function AlertsPage() {
     navigate('/workorders')
   }
 
+  const viewOnMap = (alert) => {
+    if (alert.lampadaire_id) {
+      navigate(`/map?lampId=${alert.lampadaire_id}`)
+    } else if (alert.lcu_id) {
+      navigate(`/map?lcuId=${alert.lcu_id}`)
+    }
+  }
+
   return (
     <div className="space-y-5">
       {/* Count cards */}
@@ -140,6 +247,9 @@ export default function AlertsPage() {
           </Card>
         ))}
       </div>
+
+      {/* 24h activity sparkline */}
+      <AlertSparkline data={timeline} />
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3 items-center">
@@ -172,11 +282,14 @@ export default function AlertsPage() {
             {selected.size === alerts.length ? 'Tout désélectionner' : 'Tout sélectionner'}
           </button>
         )}
-        <span className="text-[12px] text-[var(--text-muted)] ml-auto">{alerts.length} alertes</span>
+        <div className="ml-auto flex items-center gap-3">
+          <LiveBanner dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} />
+          <span className="text-[12px] text-[var(--text-muted)]">{alerts.length} alertes</span>
+        </div>
       </div>
 
       {/* Alert list */}
-      {alertsLoading ? <PageLoader /> : (
+      {alertsLoading ? <TableSkeleton rows={8} cols={5} /> : (
         <div className="space-y-2 pb-20">
           {alerts.length === 0 ? (
             <Card className="py-16 text-center text-[var(--text-muted)]">Aucune alerte</Card>
@@ -215,7 +328,7 @@ export default function AlertsPage() {
                         </p>
                       </div>
 
-                      {/* Right side: WO badge + status + chevron */}
+                      {/* Right side: WO badge + map button + status + chevron */}
                       <div className="flex items-center gap-2 shrink-0">
                         {hasWO && (
                           <WorkOrderBadge woId={a.work_order_id} onClick={viewWorkOrder} />
@@ -224,6 +337,15 @@ export default function AlertsPage() {
                           <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-500 font-semibold uppercase tracking-wide">
                             Auto
                           </span>
+                        )}
+                        {(a.lampadaire_id || a.lcu_id) && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); viewOnMap(a) }}
+                            title="Voir sur la carte"
+                            className="p-1 rounded-lg text-[var(--text-muted)] hover:text-brand-500 hover:bg-brand-500/10 transition-colors"
+                          >
+                            <MapPin size={13} />
+                          </button>
                         )}
                         <span className={cn('text-[11px] px-2 py-0.5 rounded-full font-medium',
                           a.status === 'open' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' :
@@ -295,6 +417,12 @@ export default function AlertsPage() {
 
                     {/* Alert actions */}
                     <div className="flex gap-2 pt-1 flex-wrap">
+                      {(a.lampadaire_id || a.lcu_id) && (
+                        <Button size="sm" variant="secondary"
+                          onClick={() => viewOnMap(a)}>
+                          <MapPin size={12} /> Voir sur la carte
+                        </Button>
+                      )}
                       {a.status === 'open' && (
                         <Button size="sm" variant="secondary" loading={busy}
                           onClick={() => singleAction.mutate({ fn: ackAlert, id: a.id, label: 'Alerte acquittée' })}>
@@ -321,6 +449,9 @@ export default function AlertsPage() {
           })}
         </div>
       )}
+
+      {/* AI Page Insights */}
+      <AIPageInsights page="alerts" title="Analyse IA des alertes" />
 
       {/* Bulk action bar */}
       <BulkActionBar count={selected.size} onClear={() => setSelected(new Set())}>

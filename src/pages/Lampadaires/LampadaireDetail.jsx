@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   X, Zap, Thermometer, Droplets, Eye, Activity, Cpu, Shield,
-  Gauge, Wifi, Clock, AlertTriangle, CheckCircle, Edit2, Save,
+  Gauge, Wifi, Clock, AlertTriangle, CheckCircle, Edit2, Save, Sparkles,
 } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import toast from 'react-hot-toast'
@@ -13,8 +13,9 @@ import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import { PageLoader } from '../../components/ui/Spinner'
 import { statusColor, labelStatus, commissioningColor, labelCommissioning, formatDate, cn } from '../../utils/helpers'
+import AIEntityInsightPanel from '../../components/ai/AIEntityInsightPanel'
 
-const TABS = ['Info', 'Contrôleur', 'Télémétrie', 'Dimming', 'Décisions', 'Éditer']
+const TABS = ['Info', 'Contrôleur', 'Télémétrie', 'Dimming', 'Décisions', 'Analyse IA', 'Éditer']
 
 const inputCls = 'w-full px-3 py-2 text-[13px] bg-[var(--surface-2)] border border-[var(--border)] rounded-xl text-[var(--text)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500/50 transition-all'
 
@@ -422,6 +423,19 @@ export default function LampadaireDetail({ lamp: initialLamp, onClose, onUpdate 
                   <p className="text-[10px] text-[var(--text-muted)] mt-1">{formatDate(d.created_at)}</p>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* ── Analyse IA ── */}
+          {tab === 'Analyse IA' && (
+            <div className="-m-6 flex flex-col" style={{ minHeight: 'calc(100% + 3rem)' }}>
+              <AIEntityInsightPanel
+                entityType="lampadaire"
+                entityId={lamp.id}
+                open
+                onClose={() => setTab('Info')}
+                inline
+              />
             </div>
           )}
 

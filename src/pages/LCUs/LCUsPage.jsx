@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Plus, TestTube, RefreshCw, Radio, X, Edit2, Save, Wifi, WifiOff, ChevronDown } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
+import { Plus, TestTube, RefreshCw, Radio, X, Edit2, Save, Wifi, WifiOff, ChevronDown, Sparkles } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { getLCUs, getLCU, createLCU, updateLCU, testLCU, syncLCU, getLCULampadaires } from '../../api/lcus'
 import Table from '../../components/ui/Table'
@@ -8,6 +9,8 @@ import Badge from '../../components/ui/Badge'
 import Modal from '../../components/ui/Modal'
 import Spinner, { PageLoader } from '../../components/ui/Spinner'
 import EmptyState from '../../components/ui/EmptyState'
+import AIPageInsights from '../../components/ai/AIPageInsights'
+import AIEntityInsightPanel from '../../components/ai/AIEntityInsightPanel'
 import { statusColor, labelStatus, timeAgo, cn } from '../../utils/helpers'
 
 const INITIAL = { reference: '', name: '', ip_address: '', port: 8080, protocol: 'HTTP', zone: '' }
@@ -313,6 +316,8 @@ export default function LCUsPage() {
   const [saving,     setSaving]     = useState(false)
   const [busy,       setBusy]       = useState(null)
   const [selectedId, setSelectedId] = useState(null)
+  const [aiPanel, setAiPanel] = useState(null) // { entityType, entityId }
+  const [searchParams] = useSearchParams()
 
   const load = () => {
     setLoading(true)
@@ -322,6 +327,27 @@ export default function LCUsPage() {
       .finally(() => setLoading(false))
   }
   useEffect(load, [])
+
+  // Auto-open detail panel when navigated from AI Center ("Voir LCU")
+  // Supports ?id=<numeric_lcu_id> (preferred) or ?ref=<lcu_reference> (fallback)
+  useEffect(() => {
+    const id = Number(searchParams.get('id'))
+    if (id) { setSelectedId(id); return }
+    const ref = searchParams.get('ref')
+    if (!ref || lcus.length === 0) return
+    const match = lcus.find((l) => l.reference === ref)
+    if (match) setSelectedId(match.id)
+  }, [lcus.length, searchParams]) // eslint-disable-line
+
+  // Silent auto-refresh every 30s — keeps LCU status live without the spinner
+  useEffect(() => {
+    const id = setInterval(() => {
+      getLCUs()
+        .then((r) => setLCUs(Array.isArray(r) ? r : r?.lcus || []))
+        .catch(() => {})
+    }, 30_000)
+    return () => clearInterval(id)
+  }, [])
 
   const handleCreate = async (e) => {
     e.preventDefault()
@@ -374,6 +400,13 @@ export default function LCUsPage() {
           <Button size="sm" variant="ghost" loading={busy === id} onClick={doAction(syncLCU, id, 'Sync lancée')}>
             <RefreshCw size={12} /> Sync
           </Button>
+          <button
+            onClick={() => setAiPanel({ entityType: 'lcu', entityId: id })}
+            title="Analyse IA"
+            className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-brand-500 hover:bg-brand-500/10 transition-colors"
+          >
+            <Sparkles size={13} />
+          </button>
         </div>
       )
     },
@@ -402,6 +435,17 @@ export default function LCUsPage() {
           renderExpandableRow={(row) => <LCULampadairesList lcuId={row.id} />}
         />
       )}
+
+      {/* AI Page Insights */}
+      <AIPageInsights page="lcus" title="Analyse IA des LCUs" />
+
+      {/* AI Entity Insight Panel */}
+      <AIEntityInsightPanel
+        entityType={aiPanel?.entityType}
+        entityId={aiPanel?.entityId}
+        open={aiPanel !== null}
+        onClose={() => setAiPanel(null)}
+      />
 
       {/* Create modal */}
       <Modal open={modal} onClose={() => setModal(false)} title="Nouvelle LCU / Passerelle">

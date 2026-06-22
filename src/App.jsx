@@ -19,6 +19,8 @@ import AuditLogPage from './pages/AuditLog/AuditLogPage'
 import SystemHealthPage from './pages/SystemHealth/SystemHealthPage'
 import MaintenancePage from './pages/Maintenance/MaintenancePage'
 import SettingsPage from './pages/Settings/SettingsPage'
+import AIAssistantPage from './pages/AIAssistant/AIAssistantPage'
+import AICenterPage from './pages/AICenter/AICenterPage'
 
 export default function App() {
   return (
@@ -43,6 +45,8 @@ export default function App() {
         <Route path="/system-health" element={<SystemHealthPage />} />
         <Route path="/maintenance" element={<MaintenancePage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/ai-assistant" element={<AIAssistantPage />} />
+        <Route path="/ai-center" element={<AICenterPage />} />
       </Route>
     </Routes>
   )

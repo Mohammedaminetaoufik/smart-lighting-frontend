@@ -10,3 +10,4 @@ export const updateMaintenanceWindow = (id, data) => client.put(`/maintenance-wi
 export const cancelMaintenanceWindow = (id) => client.post(`/maintenance-windows/${id}/cancel`)
 export const completeMaintenanceWindow = (id) => client.post(`/maintenance-windows/${id}/complete`)
 export const deleteMaintenanceWindow = (id) => client.delete(`/maintenance-windows/${id}`)
+export const getMaintenanceWindowWorkOrders = (id) => client.get(`/maintenance-windows/${id}/workorders`)

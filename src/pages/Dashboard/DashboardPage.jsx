@@ -10,13 +10,14 @@ import {
 import StatCard from '../../components/ui/StatCard'
 import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
-import { PageLoader } from '../../components/ui/Spinner'
+import { StatCardSkeleton, ChartSkeleton } from '../../components/ui/Skeleton'
 import { getStats, getNetworkHealth, getEnergySummary, getDailyEnergy } from '../../api/dashboard'
 import { getAlerts, getAlertCounts } from '../../api/alerts'
 import { getLampadaires } from '../../api/lampadaires'
 import { runAllCalculator } from '../../api/calculator'
 import { QK } from '../../lib/queryClient'
 import { severityColor, labelSeverity, timeAgo } from '../../utils/helpers'
+import AIDashboardInsights from '../../components/ai/AIDashboardInsights'
 
 /* ── Reusable donut chart ─────────────────────────────────── */
 function DonutChart({ title, subtitle, data, total }) {
@@ -558,27 +559,34 @@ export default function DashboardPage() {
   const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: QK.dashboard,
     queryFn: getStats,
+    refetchInterval: 30_000,
   })
   const { data: health } = useQuery({
     queryKey: ['network-health'],
     queryFn: getNetworkHealth,
+    refetchInterval: 30_000,
   })
   const { data: alertsRes } = useQuery({
     queryKey: QK.alerts({ status: 'open', limit: 5 }),
     queryFn: () => getAlerts({ status: 'open', limit: 5 }),
+    refetchInterval: 30_000,
   })
   const { data: alertCounts } = useQuery({
     queryKey: QK.alertCounts,
     queryFn: getAlertCounts,
+    refetchInterval: 30_000,
   })
   const { data: energy } = useQuery({
     queryKey: ['energy-summary'],
     queryFn: getEnergySummary,
   })
-  const { data: daily } = useQuery({
+  const { data: dailyRes } = useQuery({
     queryKey: ['energy-daily'],
     queryFn: () => getDailyEnergy(30),
+    refetchInterval: 30_000,
   })
+  // Backend returns { days: [...], previous_total_kwh } — normalize to an array
+  const daily = Array.isArray(dailyRes) ? dailyRes : (dailyRes?.days ?? [])
 
   const { data: lampsRes } = useQuery({
     queryKey: ['lampadaires-all'],
@@ -601,7 +609,18 @@ export default function DashboardPage() {
     onError: (e) => toast.error(e.message),
   })
 
-  if (statsLoading) return <PageLoader />
+  if (statsLoading) {
+    return (
+      <div className="space-y-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCardSkeleton /><StatCardSkeleton /><StatCardSkeleton /><StatCardSkeleton />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <ChartSkeleton /><ChartSkeleton />
+        </div>
+      </div>
+    )
+  }
 
   const online      = stats?.lampadaires_online      ?? 0
   const offline     = stats?.lampadaires_offline     ?? 0
@@ -624,6 +643,9 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
+
+      {/* ── AI Dashboard Insights (merged digest + page insights) ── */}
+      <AIDashboardInsights />
 
       {/* ── KPI stat cards ────────────────────────────────── */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -748,6 +770,7 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
+
 
       {/* ── Stat detail modal ─────────────────────────────── */}
       {modal && (

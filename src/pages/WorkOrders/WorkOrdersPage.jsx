@@ -18,6 +18,7 @@ import { QK } from '../../lib/queryClient'
 import Card from '../../components/ui/Card'
 import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
+import AIPageInsights from '../../components/ai/AIPageInsights'
 import Modal from '../../components/ui/Modal'
 import EmptyState from '../../components/ui/EmptyState'
 import { PageLoader } from '../../components/ui/Spinner'
@@ -266,6 +267,27 @@ function WODetailPanel({ woId, onClose, users, onAction, actionBusy, onAssign })
                 </span>
               )}
             </div>
+
+            {/* Source alert callout */}
+            {(wo.source_type === 'alert' || wo.source_alert_id) && (
+              <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-red-500/8 border border-red-500/20">
+                <AlertTriangle size={14} className="text-red-400 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[11px] font-semibold text-red-400">Depuis alerte</p>
+                  {wo.source_alert_id && (
+                    <p className="text-[10px] text-[var(--text-muted)]">Alerte #{wo.source_alert_id}</p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Maintenance window callout */}
+            {wo.source_type === 'maintenance_window' && (
+              <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-blue-500/8 border border-blue-500/20">
+                <CheckCircle size={14} className="text-blue-400 shrink-0" />
+                <p className="text-[11px] font-semibold text-blue-400">Maintenance planifiée</p>
+              </div>
+            )}
 
             {/* Info grid */}
             <div className="grid grid-cols-2 gap-3">
@@ -792,6 +814,9 @@ export default function WorkOrdersPage() {
           </div>
         )}
       </Modal>
+
+      {/* AI Page Insights */}
+      <AIPageInsights page="workorders" title="Analyse IA des interventions" />
 
       {/* New WO modal */}
       <NewWOModal open={newWOOpen} onClose={() => setNewWOOpen(false)} onCreated={invalidate} />

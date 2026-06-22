@@ -3,6 +3,7 @@ import client from './client'
 export const getAlerts = (params) => client.get('/alerts', { params })
 export const getAlertCounts = () => client.get('/alerts/counts')
 export const getAlertSummary = () => client.get('/alerts/summary')
+export const getAlertTimeline = () => client.get('/alerts/timeline')
 export const resolveAlert = (id) => client.post(`/alerts/${id}/resolve`)
 export const ackAlert = (id) => client.post(`/alerts/${id}/ack`)
 export const closeAlert = (id) => client.post(`/alerts/${id}/close`)

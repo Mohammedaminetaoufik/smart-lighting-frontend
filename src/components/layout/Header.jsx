@@ -1,7 +1,8 @@
-import { Sun, Moon, Menu, Bell } from 'lucide-react'
+import { Sun, Moon, Menu } from 'lucide-react'
 import { useTheme } from '../../context/ThemeContext'
 import { useLocation } from 'react-router-dom'
 import GlobalSearch from './GlobalSearch'
+import NotificationCenter from './NotificationCenter'
 
 const PAGE_TITLES = {
   '/':             'Tableau de bord',
@@ -42,14 +43,7 @@ export default function Header({ onMenuClick, alertCount = 0 }) {
 
       <div className="flex items-center gap-2">
         <GlobalSearch />
-        {alertCount > 0 && (
-          <div className="relative">
-            <Bell size={18} className="text-[var(--text-muted)]" />
-            <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
-              {alertCount > 9 ? '9+' : alertCount}
-            </span>
-          </div>
-        )}
+        <NotificationCenter />
         <button
           onClick={toggle}
           className="p-2 rounded-lg hover:bg-[var(--surface-2)] text-[var(--text-muted)] transition-colors"

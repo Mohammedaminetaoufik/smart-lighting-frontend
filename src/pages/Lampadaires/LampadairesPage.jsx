@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Search, Lightbulb, Download, Archive, MapPin, Upload } from 'lucide-react'
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
+import { Search, Lightbulb, Download, Archive, MapPin, Upload, Sparkles } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { getLampadaires } from '../../api/lampadaires'
 import { bulkArchiveLampadaires, bulkUpdateLampadaires } from '../../api/bulk'
@@ -8,49 +9,66 @@ import Table from '../../components/ui/Table'
 import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
+import Pagination from '../../components/ui/Pagination'
 import BulkActionBar from '../../components/ui/BulkActionBar'
+import { TableSkeleton } from '../../components/ui/Skeleton'
 import { statusColor, labelStatus, commissioningColor, labelCommissioning, cn } from '../../utils/helpers'
 import LampadaireDetail from './LampadaireDetail'
 import ImportModal from './ImportModal'
+import AIPageInsights from '../../components/ai/AIPageInsights'
+import AIEntityInsightPanel from '../../components/ai/AIEntityInsightPanel'
 
 const STATUSES = ['online', 'offline', 'maintenance']
 const COMMISSIONING = ['discovered', 'located', 'configured', 'tested', 'commissioned']
 
+function useDebounced(value, delay = 350) {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay)
+    return () => clearTimeout(t)
+  }, [value, delay])
+  return debounced
+}
+
 export default function LampadairesPage() {
-  const [data, setData] = useState([])
-  const [loading, setLoading] = useState(true)
+  const queryClient = useQueryClient()
   const [selected, setSelected] = useState(null)
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
   const [filterCom, setFilterCom] = useState('')
+  const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState(50)
   const [picked, setPicked] = useState(new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
   const [zoneModalOpen, setZoneModalOpen] = useState(false)
   const [newZone, setNewZone] = useState('')
   const [importOpen, setImportOpen] = useState(false)
+  const [aiPanel, setAiPanel] = useState(null) // { entityType, entityId }
 
-  const load = () => {
-    setLoading(true)
-    getLampadaires()
-      .then((r) => setData(Array.isArray(r) ? r : r?.lampadaires || []))
-      .catch(() => {})
-      .finally(() => { setLoading(false); setPicked(new Set()) })
-  }
-  useEffect(load, [])
+  const debouncedSearch = useDebounced(search)
 
-  const filtered = data.filter((l) => {
-    if (filterStatus && l.etat !== filterStatus) return false
-    if (filterCom && l.commissioning_status !== filterCom) return false
-    if (search) {
-      const q = search.toLowerCase()
-      return (
-        l.reference?.toLowerCase().includes(q) ||
-        l.zone?.toLowerCase().includes(q) ||
-        l.device_uid?.toLowerCase().includes(q)
-      )
-    }
-    return true
+  // Retour page 0 quand un filtre change
+  useEffect(() => { setPage(0); setPicked(new Set()) }, [debouncedSearch, filterStatus, filterCom, pageSize])
+
+  const { data: res, isLoading } = useQuery({
+    queryKey: ['lampadaires-page', page, pageSize, debouncedSearch, filterStatus, filterCom],
+    queryFn: () => getLampadaires({
+      limit: pageSize,
+      offset: page * pageSize,
+      ...(debouncedSearch && { q: debouncedSearch }),
+      ...(filterStatus && { etat: filterStatus }),
+      ...(filterCom && { commissioning: filterCom }),
+    }),
+    placeholderData: keepPreviousData,
   })
+
+  const data = res?.items ?? []
+  const total = res?.total ?? 0
+
+  const reload = () => {
+    setPicked(new Set())
+    queryClient.invalidateQueries({ queryKey: ['lampadaires-page'] })
+  }
 
   const toggleOne = (id) => setPicked((s) => {
     const next = new Set(s)
@@ -58,10 +76,10 @@ export default function LampadairesPage() {
     return next
   })
 
-  const allSelected = filtered.length > 0 && picked.size === filtered.length
+  const allSelected = data.length > 0 && picked.size === data.length
   const toggleAll = () => {
     if (allSelected) setPicked(new Set())
-    else setPicked(new Set(filtered.map((l) => l.id)))
+    else setPicked(new Set(data.map((l) => l.id)))
   }
 
   const handleArchive = async () => {
@@ -71,7 +89,7 @@ export default function LampadairesPage() {
     try {
       const res = await bulkArchiveLampadaires([...picked])
       toast.success(`${res?.archived ?? 0} archivé(s)`)
-      load()
+      reload()
     } catch (e) {
       toast.error(e.message)
     } finally {
@@ -88,7 +106,7 @@ export default function LampadairesPage() {
       toast.success(`${res?.updated ?? 0} mis à jour`)
       setZoneModalOpen(false)
       setNewZone('')
-      load()
+      reload()
     } catch (e) {
       toast.error(e.message)
     } finally {
@@ -161,6 +179,19 @@ export default function LampadairesPage() {
       key: 'has_critical_alert', label: 'Alerte',
       render: (v) => v ? <span className="text-[11px] text-red-500 font-semibold">⚠ Critique</span> : null
     },
+    {
+      key: 'id', label: '',
+      className: 'w-10',
+      render: (id) => (
+        <button
+          onClick={(e) => { e.stopPropagation(); setAiPanel({ entityType: 'lampadaire', entityId: id }) }}
+          title="Analyse IA"
+          className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-brand-500 hover:bg-brand-500/10 transition-colors"
+        >
+          <Sparkles size={13} />
+        </button>
+      ),
+    },
   ]
 
   return (
@@ -198,17 +229,30 @@ export default function LampadairesPage() {
         <Button variant="secondary" size="sm" onClick={() => setImportOpen(true)}>
           <Upload size={13} /> Importer CSV
         </Button>
-        <span className="text-[12px] text-[var(--text-muted)]">{filtered.length} / {data.length}</span>
+        <span className="text-[12px] text-[var(--text-muted)]">{data.length} / {total}</span>
       </div>
 
       {/* Table */}
-      <Table
-        columns={columns}
-        data={filtered}
-        loading={loading}
-        onRowClick={setSelected}
-        emptyText="Aucun lampadaire trouvé"
-      />
+      {isLoading ? (
+        <TableSkeleton rows={10} cols={8} />
+      ) : (
+        <>
+          <Table
+            columns={columns}
+            data={data}
+            onRowClick={setSelected}
+            emptyText="Aucun lampadaire trouvé"
+          />
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            total={total}
+            onChange={setPage}
+            pageSizes={[25, 50, 100]}
+            onPageSizeChange={setPageSize}
+          />
+        </>
+      )}
 
       {/* Detail sheet */}
       {selected && (
@@ -216,7 +260,7 @@ export default function LampadairesPage() {
           lamp={selected}
           onClose={() => setSelected(null)}
           onUpdate={(updated) => {
-            setData((d) => d.map((l) => (l.id === updated.id ? updated : l)))
+            queryClient.invalidateQueries({ queryKey: ['lampadaires-page'] })
             setSelected(updated)
           }}
         />
@@ -232,10 +276,21 @@ export default function LampadairesPage() {
         </Button>
       </BulkActionBar>
 
+      {/* AI Page Insights */}
+      <AIPageInsights page="lampadaires" title="Analyse IA des lampadaires" />
+
+      {/* AI Entity Insight Panel */}
+      <AIEntityInsightPanel
+        entityType={aiPanel?.entityType}
+        entityId={aiPanel?.entityId}
+        open={aiPanel !== null}
+        onClose={() => setAiPanel(null)}
+      />
+
       {/* CSV import modal */}
       <ImportModal
         open={importOpen}
-        onClose={() => { setImportOpen(false); load() }}
+        onClose={() => { setImportOpen(false); reload() }}
       />
 
       {/* Zone update modal */}

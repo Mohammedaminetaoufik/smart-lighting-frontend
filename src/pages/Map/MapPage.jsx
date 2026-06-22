@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useTheme } from '../../context/ThemeContext'
 import {
   MapContainer, TileLayer, Marker, Circle, Polyline,
@@ -7,6 +7,7 @@ import {
 } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+import MarkerClusterGroup from 'react-leaflet-cluster'
 import toast from 'react-hot-toast'
 import { getLampadaires, getMissingLocation, updateLocation, setDimming as apiSetDimming, getLatestTelemetry, assignLCU as apiAssignLCU } from '../../api/lampadaires'
 import { getLCUs, createLCU as apiCreateLCU, bulkDimLCU as apiBulkDimLCU } from '../../api/lcus'
@@ -17,9 +18,10 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   Layers, RefreshCw, Power, PowerOff,
   AlertTriangle, Thermometer, Eye, Activity, MapPin,
-  LocateFixed, SkipForward, Plus, Workflow,
+  LocateFixed, SkipForward, Plus, Workflow, Sparkles,
 } from 'lucide-react'
 import { cn } from '../../utils/helpers'
+import AIEntityInsightPanel from '../../components/ai/AIEntityInsightPanel'
 
 /* ──────────────────────────────────────────────────────────────
    CONSTANTS
@@ -118,6 +120,34 @@ function buildArc(pct) {
 function polarToCart(cx, cy, r, deg) {
   const rad = (deg * Math.PI) / 180
   return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) }
+}
+
+function createClusterCustomIcon(cluster) {
+  const count = cluster.getChildCount()
+  return L.divIcon({
+    html: `
+      <div style="
+        background: rgba(15, 23, 42, 0.9);
+        border: 2px solid #3b82f6;
+        border-radius: 50%;
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 13px;
+        font-weight: 800;
+        width: 36px;
+        height: 36px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.5), 0 0 15px rgba(59, 130, 246, 0.4);
+        backdrop-filter: blur(4px);
+        font-family: 'Inter', sans-serif;
+      ">
+        ${count}
+      </div>`,
+    className: '',
+    iconSize: L.point(36, 36),
+    iconAnchor: [18, 18],
+  })
 }
 
 function makeLCUIcon(ref, count, isSelected) {
@@ -255,6 +285,8 @@ export default function MapPage() {
   const [savingLCU,   setSavingLCU]   = useState(false)
   const mapRef = useRef(null)
   const [activeTab, setActiveTab] = useState('network')
+  const [aiPanel, setAiPanel] = useState(null) // { entityType, entityId }
+  const [searchParams, setSearchParams] = useSearchParams()
 
   const flyTo = useCallback((lat, lng, zoom = 18) => {
     mapRef.current?.flyTo([lat, lng], zoom, { animate: true, duration: 0.8 })
@@ -384,6 +416,49 @@ export default function MapPage() {
 
   useEffect(load, [load])
 
+  /* silent auto-refresh every 30s — keeps the map live without the loading spinner */
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (placing || addingLCU) return // don't disturb active placement flows
+      Promise.all([
+        getLampadaires().catch(() => null),
+        getLCUs().catch(() => null),
+      ]).then(([ls, lu]) => {
+        if (ls) setLamps(Array.isArray(ls) ? ls : ls?.lampadaires || [])
+        if (lu) setLCUs(Array.isArray(lu) ? lu : lu?.lcus || [])
+      })
+    }, 30_000)
+    return () => clearInterval(id)
+  }, [placing, addingLCU])
+
+  /* highlight entity from URL params (e.g. navigated from AlertsPage) */
+  useEffect(() => {
+    if (loading) return
+    const lampId = searchParams.get('lampId')
+    const lcuId  = searchParams.get('lcuId')
+    if (!lampId && !lcuId) return
+
+    if (lampId) {
+      const lamp = lamps.find((l) => String(l.id) === lampId)
+      if (lamp) {
+        setSelected({ type: 'lamp', data: lamp })
+        if (lamp.latitude && lamp.longitude) {
+          setTimeout(() => flyTo(lamp.latitude, lamp.longitude, 18), 300)
+        }
+      }
+    } else if (lcuId) {
+      const lcu = lcus.find((l) => String(l.id) === lcuId)
+      if (lcu) {
+        setSelected({ type: 'lcu', data: lcu })
+        if (lcu.latitude && lcu.longitude) {
+          setTimeout(() => flyTo(lcu.latitude, lcu.longitude, 16), 300)
+        }
+      }
+    }
+    // clear params so back navigation doesn't re-trigger
+    setSearchParams({}, { replace: true })
+  }, [loading, lamps, lcus, searchParams, setSearchParams, flyTo])
+
   /* derived */
   const lampsByLCU = useMemo(() => {
     const m = {}
@@ -493,31 +568,62 @@ export default function MapPage() {
             pathOptions={{ color: '#3b82f6', weight: 1, opacity: 0.45, dashArray: '4 6' }} />
         ))}
 
-        {/* Lamp markers — key includes intensite so Leaflet remounts on state change */}
-        {filtered.map((lamp) => {
-          const isSelected = selected?.type === 'lamp' && selected.data.id === lamp.id
-          const isLit = (lamp.intensite ?? 0) > 0
-          return (
-            <Marker
-              key={`${lamp.id}-${isLit ? 1 : 0}-${isSelected ? 1 : 0}`}
-              position={[lamp.latitude, lamp.longitude]}
-              icon={makeLampIcon(lamp.etat, isSelected, lamp.has_critical_alert, lamp.intensite)}
-              zIndexOffset={isSelected ? 2000 : lamp.has_critical_alert ? 1000 : 0}
-              eventHandlers={{ click: (e) => { e.originalEvent.stopPropagation(); setSelected({ type:'lamp', data:lamp }) } }}
-            >
-              <Tooltip direction="top" offset={[0, -8]} opacity={1}
-                className="!bg-transparent !border-0 !shadow-none !p-0">
-                <div className="map-glass px-2.5 py-1.5 text-[11px] font-medium whitespace-nowrap">
-                  <span className="font-mono">{lamp.reference}</span>
-                  <span className="mx-1.5 opacity-40">·</span>
-                  <span style={{ color: STATUS[lamp.etat]?.hex }}>{STATUS[lamp.etat]?.label}</span>
-                  <span className="mx-1.5 opacity-40">·</span>
-                  <span className="text-white/70">{lamp.intensite ?? 0}%</span>
-                </div>
-              </Tooltip>
-            </Marker>
-          )
-        })}
+        {/* Clustered Lamp markers */}
+        <MarkerClusterGroup
+          chunkedLoading
+          maxClusterRadius={60}
+          disableClusteringAtZoom={17}
+          iconCreateFunction={createClusterCustomIcon}
+        >
+          {filtered
+            .filter((l) => !(selected?.type === 'lamp' && selected.data.id === l.id))
+            .map((lamp) => {
+              const isLit = (lamp.intensite ?? 0) > 0
+              return (
+                <Marker
+                  key={`${lamp.id}-${isLit ? 1 : 0}`}
+                  position={[lamp.latitude, lamp.longitude]}
+                  icon={makeLampIcon(lamp.etat, false, lamp.has_critical_alert, lamp.intensite)}
+                  zIndexOffset={lamp.has_critical_alert ? 1000 : 0}
+                  eventHandlers={{ click: (e) => { e.originalEvent.stopPropagation(); setSelected({ type: 'lamp', data: lamp }) } }}
+                >
+                  <Tooltip direction="top" offset={[0, -8]} opacity={1}
+                    className="!bg-transparent !border-0 !shadow-none !p-0">
+                    <div className="map-glass px-2.5 py-1.5 text-[11px] font-medium whitespace-nowrap">
+                      <span className="font-mono">{lamp.reference}</span>
+                      <span className="mx-1.5 opacity-40">·</span>
+                      <span style={{ color: STATUS[lamp.etat]?.hex }}>{STATUS[lamp.etat]?.label}</span>
+                      <span className="mx-1.5 opacity-40">·</span>
+                      <span className="text-white/70">{lamp.intensite ?? 0}%</span>
+                    </div>
+                  </Tooltip>
+                </Marker>
+              )
+            })
+          }
+        </MarkerClusterGroup>
+
+        {/* Selected lamp (always outside cluster for visibility) */}
+        {selected?.type === 'lamp' && selected.data.latitude && selected.data.longitude && (
+          <Marker
+            key={`selected-${selected.data.id}-${(selected.data.intensite ?? 0) > 0 ? 1 : 0}`}
+            position={[selected.data.latitude, selected.data.longitude]}
+            icon={makeLampIcon(selected.data.etat, true, selected.data.has_critical_alert, selected.data.intensite)}
+            zIndexOffset={2000}
+            eventHandlers={{ click: (e) => { e.originalEvent.stopPropagation(); setSelected({ type: 'lamp', data: selected.data }) } }}
+          >
+            <Tooltip direction="top" offset={[0, -8]} opacity={1}
+              className="!bg-transparent !border-0 !shadow-none !p-0">
+              <div className="map-glass px-2.5 py-1.5 text-[11px] font-medium whitespace-nowrap">
+                <span className="font-mono">{selected.data.reference}</span>
+                <span className="mx-1.5 opacity-40">·</span>
+                <span style={{ color: STATUS[selected.data.etat]?.hex }}>{STATUS[selected.data.etat]?.label}</span>
+                <span className="mx-1.5 opacity-40">·</span>
+                <span className="text-white/70">{selected.data.intensite ?? 0}%</span>
+              </div>
+            </Tooltip>
+          </Marker>
+        )}
 
         {/* New-LCU preview marker */}
         {newLCUPos && (
@@ -1058,6 +1164,13 @@ export default function MapPage() {
       })()}
 
       {/* ═══ SELECTED ITEM BOTTOM CARD ═════════════════════════ */}
+      <AIEntityInsightPanel
+        entityType={aiPanel?.entityType}
+        entityId={aiPanel?.entityId}
+        open={aiPanel !== null}
+        onClose={() => setAiPanel(null)}
+      />
+
       {selected && (
         <div className="absolute bottom-0 left-0 right-0 z-[500]" onClick={(e) => e.stopPropagation()}>
           <div className="map-glass rounded-b-none rounded-t-2xl">
@@ -1069,6 +1182,7 @@ export default function MapPage() {
                 onClose={() => setSelected(null)}
                 flyTo={flyTo}
                 onUpdateIntensity={updateLampIntensity}
+                onAIInsight={(info) => setAiPanel(info)}
                 onLCUAssigned={(lampId, newLcuId) => {
                   setLamps((prev) => prev.map((l) => l.id === lampId ? { ...l, lcu_id: newLcuId } : l))
                   setSelected((prev) => prev?.type === 'lamp' && prev.data.id === lampId
@@ -1091,7 +1205,8 @@ export default function MapPage() {
                 toggleLCUGroup={toggleLCUGroup}
                 applyGroupIntensity={applyGroupIntensity}
                 togglingLamp={togglingLamp}
-                togglingLCU={togglingLCU} />
+                togglingLCU={togglingLCU}
+                onAIInsight={(info) => setAiPanel(info)} />
             )}
           </div>
         </div>
@@ -1187,7 +1302,7 @@ function LCUMapPopup({ lcu, lamps, toggleLamp, toggleLCUGroup, togglingLamp, tog
 /* ──────────────────────────────────────────────────────────────
    LAMP CARD (bottom panel)
 ───────────────────────────────────────────────────────────── */
-function LampCard({ lamp, lcu, allLCUs = [], onClose, flyTo, onUpdateIntensity, onSelectLCU, onLCUAssigned }) {
+function LampCard({ lamp, lcu, allLCUs = [], onClose, flyTo, onUpdateIntensity, onSelectLCU, onLCUAssigned, onAIInsight }) {
   const [dimVal, setDimVal]         = useState(lamp.intensite ?? 0)
   const [dimming, setDimming]       = useState(false)
   const [telemetry, setTelemetry]   = useState(null)
@@ -1350,6 +1465,12 @@ function LampCard({ lamp, lcu, allLCUs = [], onClose, flyTo, onUpdateIntensity, 
 
       {/* Actions */}
       <div className="flex items-center gap-0.5 shrink-0">
+        <button
+          onClick={() => onAIInsight?.({ entityType: 'lampadaire', entityId: lamp.id })}
+          className="p-1.5 rounded-lg hover:bg-white/8 text-white/25 hover:text-purple-400 transition-colors"
+          title="Analyse IA">
+          <Sparkles size={13} />
+        </button>
         {lcu && (
           <button onClick={() => onSelectLCU?.(lcu)}
             className="p-1.5 rounded-lg hover:bg-white/8 text-white/25 hover:text-blue-400 transition-colors"
@@ -1377,7 +1498,7 @@ function LampCard({ lamp, lcu, allLCUs = [], onClose, flyTo, onUpdateIntensity, 
 /* ──────────────────────────────────────────────────────────────
    LCU CARD (bottom panel)
 ───────────────────────────────────────────────────────────── */
-function LCUCard({ lcu, lamps, onClose, onSelect, flyTo, toggleLamp, toggleLCUGroup, applyGroupIntensity, togglingLamp, togglingLCU }) {
+function LCUCard({ lcu, lamps, onClose, onSelect, flyTo, toggleLamp, toggleLCUGroup, applyGroupIntensity, togglingLamp, togglingLCU, onAIInsight }) {
   const navigate = useNavigate()
   const avgIntensity = lamps.length
     ? Math.round(lamps.reduce((s, l) => s + (l.intensite ?? 0), 0) / lamps.length)
@@ -1455,6 +1576,12 @@ function LCUCard({ lcu, lamps, onClose, onSelect, flyTo, toggleLamp, toggleLCUGr
             <Eye size={14} />
           </button>
         )}
+        <button
+          onClick={() => onAIInsight?.({ entityType: 'lcu', entityId: lcu.id })}
+          className="p-1.5 rounded-lg hover:bg-white/10 text-white/30 hover:text-purple-400 transition-colors"
+          title="Analyse IA">
+          <Sparkles size={14} />
+        </button>
         <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/10 text-white/40 hover:text-white">
           <X size={14} />
         </button>

@@ -16,6 +16,7 @@ import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import EmptyState from '../../components/ui/EmptyState'
 import { PageLoader } from '../../components/ui/Spinner'
+import AIPageInsights from '../../components/ai/AIPageInsights'
 import { commissioningColor, labelCommissioning, cn } from '../../utils/helpers'
 
 const STEPS = ['discovered', 'located', 'configured', 'tested', 'commissioned']
@@ -433,6 +434,9 @@ export default function CommissioningPage() {
           </div>
         </div>
       )}
+
+      {/* AI Page Insights */}
+      <AIPageInsights page="commissioning" title="Analyse IA de la mise en service" />
 
       {/* Click outside to close dropdowns */}
       {(lcuPickerOpen || zonePicker) && (
