@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { UserPlus, Pencil, Trash2, Shield, ShieldCheck, Eye } from 'lucide-react'
+import { UserPlus, Pencil, Trash2, Shield, ShieldCheck, KeyRound, Eye, EyeOff } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getUsers, createUser, updateUser, deleteUser } from '../../api/users'
+import { resetPasswordApi } from '../../api/auth'
 import { QK } from '../../lib/queryClient'
 import Table from '../../components/ui/Table'
 import Card from '../../components/ui/Card'
@@ -14,9 +15,8 @@ import UserForm from './UserForm'
 import { formatDate, cn } from '../../utils/helpers'
 
 const ROLE_META = {
-  admin:    { label: 'Administrateur', icon: ShieldCheck, color: 'text-red-500',    bg: 'bg-red-500/15' },
-  operator: { label: 'Opérateur',      icon: Shield,      color: 'text-amber-500',  bg: 'bg-amber-500/15' },
-  viewer:   { label: 'Lecteur',        icon: Eye,         color: 'text-blue-500',   bg: 'bg-blue-500/15' },
+  admin:    { label: 'Administrateur', icon: ShieldCheck, color: 'text-red-500',   bg: 'bg-red-500/15' },
+  operator: { label: 'Technicien',     icon: Shield,      color: 'text-amber-500', bg: 'bg-amber-500/15' },
 }
 
 const STATUS_META = {
@@ -24,11 +24,77 @@ const STATUS_META = {
   disabled: { label: 'Désactivé', bg: 'bg-zinc-500/15',  text: 'text-zinc-500',                       dot: 'bg-zinc-500' },
 }
 
+function ResetPasswordModal({ user, onClose }) {
+  const [newPwd,   setNewPwd]   = useState('')
+  const [showPwd,  setShowPwd]  = useState(false)
+  const [error,    setError]    = useState('')
+  const [busy,     setBusy]     = useState(false)
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    if (newPwd.length < 8) { setError('Au moins 8 caractères requis.'); return }
+    setError('')
+    setBusy(true)
+    try {
+      await resetPasswordApi(user.id, newPwd)
+      toast.success(`Mot de passe de ${user.full_name} réinitialisé`)
+      onClose()
+    } catch (err) {
+      setError(err.message || 'Erreur lors de la réinitialisation')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <p className="text-[13px] text-[var(--text-muted)]">
+        Définir un nouveau mot de passe pour <span className="font-semibold text-[var(--text)]">{user.full_name}</span>.
+        Communiquez-le à l'utilisateur après validation.
+      </p>
+
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wide">
+          Nouveau mot de passe
+        </label>
+        <div className="relative">
+          <input
+            type={showPwd ? 'text' : 'password'}
+            autoComplete="new-password"
+            required
+            value={newPwd}
+            onChange={(e) => setNewPwd(e.target.value)}
+            placeholder="Min. 8 caractères"
+            className="w-full px-3 py-2.5 pr-9 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text)] text-sm placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
+          />
+          <button
+            type="button"
+            onClick={() => setShowPwd(v => !v)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text)]"
+          >
+            {showPwd ? <EyeOff size={14} /> : <Eye size={14} />}
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <p className="text-xs text-red-500 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>
+      )}
+
+      <div className="flex justify-end gap-2 pt-1">
+        <Button variant="ghost" type="button" onClick={onClose}>Annuler</Button>
+        <Button type="submit" loading={busy}>Réinitialiser</Button>
+      </div>
+    </form>
+  )
+}
+
 export default function UsersPage() {
   const qc = useQueryClient()
-  const [createOpen, setCreateOpen] = useState(false)
-  const [editing, setEditing] = useState(null)
-  const [deleting, setDeleting] = useState(null)
+  const [createOpen,    setCreateOpen]    = useState(false)
+  const [editing,       setEditing]       = useState(null)
+  const [deleting,      setDeleting]      = useState(null)
+  const [resettingPwd,  setResettingPwd]  = useState(null)
 
   const { data: users = [], isLoading } = useQuery({
     queryKey: QK.users,
@@ -75,7 +141,7 @@ export default function UsersPage() {
       key: 'role',
       label: 'Rôle',
       render: (v) => {
-        const meta = ROLE_META[v] || ROLE_META.viewer
+        const meta = ROLE_META[v] || ROLE_META.operator
         const Icon = meta.icon
         return (
           <div className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full', meta.bg)}>
@@ -108,9 +174,16 @@ export default function UsersPage() {
     {
       key: 'actions',
       label: '',
-      className: 'w-24',
+      className: 'w-32',
       render: (_, row) => (
         <div className="flex items-center gap-1 justify-end">
+          <button
+            onClick={(e) => { e.stopPropagation(); setResettingPwd(row) }}
+            className="p-1.5 rounded-lg hover:bg-[var(--surface-2)] text-[var(--text-muted)] hover:text-[var(--primary)]"
+            title="Réinitialiser le mot de passe"
+          >
+            <KeyRound size={13} />
+          </button>
           <button
             onClick={(e) => { e.stopPropagation(); setEditing(row) }}
             className="p-1.5 rounded-lg hover:bg-[var(--surface-2)] text-[var(--text-muted)] hover:text-[var(--text)]"
@@ -136,7 +209,6 @@ export default function UsersPage() {
     total: users.length,
     admin: users.filter((u) => u.role === 'admin').length,
     operator: users.filter((u) => u.role === 'operator').length,
-    viewer: users.filter((u) => u.role === 'viewer').length,
   }
 
   return (
@@ -145,7 +217,7 @@ export default function UsersPage() {
         <div>
           <h1 className="text-[20px] font-bold text-[var(--text)]">Gestion des utilisateurs</h1>
           <p className="text-[13px] text-[var(--text-muted)] mt-0.5">
-            {stats.total} utilisateurs · {stats.admin} admin · {stats.operator} opérateurs · {stats.viewer} lecteurs
+            {stats.total} utilisateurs · {stats.admin} admin · {stats.operator} techniciens
           </p>
         </div>
         <Button onClick={() => setCreateOpen(true)}>
@@ -177,6 +249,18 @@ export default function UsersPage() {
           busy={updateMut.isPending}
           submitLabel="Enregistrer"
         />
+      </Modal>
+
+      {/* Reset password modal */}
+      <Modal
+        open={!!resettingPwd}
+        onClose={() => setResettingPwd(null)}
+        title={`Réinitialiser le mot de passe`}
+        size="sm"
+      >
+        {resettingPwd && (
+          <ResetPasswordModal user={resettingPwd} onClose={() => setResettingPwd(null)} />
+        )}
       </Modal>
 
       {/* Delete confirmation */}

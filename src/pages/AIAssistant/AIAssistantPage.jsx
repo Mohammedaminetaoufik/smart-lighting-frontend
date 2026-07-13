@@ -5,15 +5,17 @@ import {
   ChevronDown, ChevronUp, AlertCircle, CheckCircle2,
   Clock, Database, Loader2, Search, Plus,
   History, WifiOff, Wifi, PanelRightClose, PanelRightOpen,
-  MessageSquarePlus, StopCircle,
+  MessageSquarePlus, StopCircle, ThumbsUp, ThumbsDown,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { checkAIHealth, askAI, askAIStream, getAIHistory, getAISuggestions } from '../../api/ai'
+import toast from 'react-hot-toast'
+import { checkAIHealth, askAI, askAIStream, getAIHistory, getAISuggestions, sendAIFeedback } from '../../api/ai'
 import { QK } from '../../lib/queryClient'
 import { cn } from '../../utils/helpers'
 import AIResultChart from '../../components/ai/AIResultChart'
 import AIExportActions from '../../components/ai/AIExportActions'
+import { normalizeMarkdown } from '../../components/ai/markdown'
 
 // ─── Suggestions ──────────────────────────────────────────────────────────────
 const QUICK_QUESTIONS = [
@@ -149,6 +151,49 @@ function PriorityBadge({ priority }) {
   )
 }
 
+// ─── Feedback 👍/👎 ───────────────────────────────────────────────────────────
+function FeedbackButtons({ question, answer }) {
+  const [rating, setRating] = useState(0) // -1 | 0 | 1
+  const [busy, setBusy] = useState(false)
+
+  const send = async (value) => {
+    if (busy || rating === value) return
+    setBusy(true)
+    const prev = rating
+    setRating(value)
+    try {
+      await sendAIFeedback({ rating: value, question, answer })
+      toast.success(value === 1 ? 'Merci pour votre retour 👍' : 'Retour enregistré, on s\'améliore 👎')
+    } catch {
+      setRating(prev)
+      toast.error('Impossible d\'envoyer le retour')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        onClick={() => send(1)}
+        title="Réponse utile"
+        className={cn('p-1 rounded-md transition-colors',
+          rating === 1 ? 'text-green-500 bg-green-500/10' : 'hover:text-green-500 hover:bg-green-500/10')}
+      >
+        <ThumbsUp size={12} />
+      </button>
+      <button
+        onClick={() => send(-1)}
+        title="Réponse à améliorer"
+        className={cn('p-1 rounded-md transition-colors',
+          rating === -1 ? 'text-red-500 bg-red-500/10' : 'hover:text-red-500 hover:bg-red-500/10')}
+      >
+        <ThumbsDown size={12} />
+      </button>
+    </div>
+  )
+}
+
 // ─── SQL block ────────────────────────────────────────────────────────────────
 function SQLBlock({ sql }) {
   const [copied, setCopied] = useState(false)
@@ -205,16 +250,8 @@ function DataTable({ columns, rows }) {
   )
 }
 
-// ─── Normalize LLM output so ReactMarkdown parses headings correctly ──────────
-// The LLM sometimes outputs "text### Titre" without a preceding newline.
-// Markdown requires headings to be on their own line.
-function normalizeMarkdown(text) {
-  if (!text) return text
-  return text
-    .replace(/\r\n/g, '\n')                          // normalize CRLF
-    .replace(/([^\n])(#{1,6} )/g, '$1\n\n$2')        // ensure blank line before headings
-    .replace(/\n{3,}/g, '\n\n')                       // collapse 3+ blank lines to 2
-}
+// normalizeMarkdown is imported from ../../components/ai/markdown (shared, robust:
+// also reconstructs tables the LLM emits glued on a single line).
 
 // ─── Animated markdown — fade-in reveal with proper Markdown rendering ────────
 function AnimatedMarkdown({ text, onDone }) {
@@ -356,6 +393,12 @@ function AIMessage({ msg }) {
               </span>
             )}
 
+            {!isStreaming && chatText && (
+              <div className="flex items-center gap-1 pl-1 border-l border-[var(--border)]">
+                <FeedbackButtons question={result.question ?? chatText.slice(0, 120)} answer={chatText} />
+              </div>
+            )}
+
             <div className="flex items-center gap-3 ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
               {!isStreaming && chatText && (
                 <button onClick={handleCopy} className="flex items-center gap-1 hover:text-[var(--text)] transition-colors">
@@ -459,6 +502,23 @@ function WelcomeScreen({ suggestions, onSelect, isAIOnline }) {
 let msgIdCounter = 0
 const genId = () => `msg_${++msgIdCounter}`
 
+// ─── Persistance des conversations (localStorage, façon ChatGPT) ──────────────
+const CONV_KEY = 'ai-conversations'
+function loadConversations() {
+  try { return JSON.parse(localStorage.getItem(CONV_KEY) || '[]') } catch { return [] }
+}
+function persistConversations(list) {
+  try { localStorage.setItem(CONV_KEY, JSON.stringify(list.slice(0, 40))) } catch { /* quota dépassé */ }
+}
+function convRelTime(ts) {
+  if (!ts) return ''
+  const d = Math.floor((Date.now() - ts) / 1000)
+  if (d < 60) return "à l'instant"
+  if (d < 3600) return `il y a ${Math.floor(d / 60)} min`
+  if (d < 86400) return `il y a ${Math.floor(d / 3600)} h`
+  return `il y a ${Math.floor(d / 86400)} j`
+}
+
 export default function AIAssistantPage() {
   const [messages, setMessages]           = useState([])
   const [question, setQuestion]           = useState('')
@@ -466,14 +526,68 @@ export default function AIAssistantPage() {
   const [historySearch, setHistorySearch] = useState('')
   const [sessionHistory, setSessionHistory] = useState([])
   const [isAnalyzing, setIsAnalyzing]     = useState(false)
+  const [conversations, setConversations] = useState(loadConversations)
+  const [activeConvId, setActiveConvId]   = useState(null)
 
   const abortRef          = useRef(null)
   const textareaRef       = useRef(null)
   const bottomRef         = useRef(null)
   const pendingQuestion   = useRef(null)   // NOSONAR — .current is accessed in handleLoadFromHistory and useEffect
+  const activeConvIdRef   = useRef(null)   // id stable de la conversation en cours
   const qc                = useQueryClient()
 
   useEffect(() => { localStorage.setItem('ai-history-open', String(historyOpen)) }, [historyOpen])
+
+  // Auto-sauvegarde de la conversation active dès qu'elle se stabilise (façon ChatGPT).
+  useEffect(() => {
+    if (isAnalyzing || messages.length === 0) return
+    const now = Date.now()
+    const firstUser = messages.find((m) => m.role === 'user')
+    const title = (firstUser?.content || 'Conversation').slice(0, 60)
+    let id = activeConvIdRef.current
+    if (!id) { id = 'conv_' + now; activeConvIdRef.current = id; setActiveConvId(id) }
+    setConversations((prev) => {
+      const existing = prev.find((c) => c.id === id)
+      const conv = {
+        id, title: existing?.title || title, messages, sessionHistory,
+        createdAt: existing?.createdAt || now, updatedAt: now,
+      }
+      const next = existing ? prev.map((c) => (c.id === id ? conv : c)) : [conv, ...prev]
+      persistConversations(next)
+      return next
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, isAnalyzing, sessionHistory])
+
+  // Charger une ancienne conversation : restaure les messages + le contexte (pour continuer).
+  const loadConversation = (id) => {
+    const c = conversations.find((x) => x.id === id)
+    if (!c) return
+    abortRef.current?.abort()
+    setIsAnalyzing(false)
+    setMessages(c.messages || [])
+    setSessionHistory(c.sessionHistory || [])
+    activeConvIdRef.current = id
+    setActiveConvId(id)
+  }
+
+  const deleteConversation = (id, e) => {
+    e?.stopPropagation()
+    setConversations((prev) => {
+      const next = prev.filter((c) => c.id !== id)
+      persistConversations(next)
+      return next
+    })
+    if (activeConvIdRef.current === id) {
+      activeConvIdRef.current = null
+      setActiveConvId(null)
+      setMessages([])
+      setSessionHistory([])
+    }
+  }
+
+  const visibleConversations = conversations.filter((c) =>
+    !historySearch || (c.title || '').toLowerCase().includes(historySearch.toLowerCase()))
 
   // Auto-scroll to bottom
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
@@ -621,6 +735,8 @@ export default function AIAssistantPage() {
     setSessionHistory([])
     setQuestion('')
     setIsAnalyzing(false)
+    activeConvIdRef.current = null
+    setActiveConvId(null)
     textareaRef.current?.focus()
   }
 
@@ -669,7 +785,7 @@ export default function AIAssistantPage() {
           <div className="flex items-center justify-between px-4 py-3.5 border-b border-[var(--border)]">
             <div className="flex items-center gap-2">
               <History size={14} className="text-[var(--text-muted)]" />
-              <span className="text-sm font-semibold text-[var(--text)]">Historique</span>
+              <span className="text-sm font-semibold text-[var(--text)]">Conversations</span>
             </div>
             <button
               onClick={() => setHistoryOpen(false)}
@@ -712,27 +828,50 @@ export default function AIAssistantPage() {
             </div>
           </div>
 
-          {/* History list */}
+          {/* Conversations list */}
           <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
-            {historyLoading ? (
-              <div className="py-8 text-center">
-                <Loader2 size={18} className="mx-auto text-brand-500 animate-spin mb-2" />
-                <p className="text-xs text-[var(--text-muted)]">Chargement...</p>
-              </div>
-            ) : historyItems.length === 0 ? (
-              <div className="py-8 text-center">
+            {visibleConversations.length === 0 ? (
+              <div className="py-8 text-center px-3">
                 <p className="text-xs text-[var(--text-muted)]">
-                  {historySearch ? 'Aucun résultat.' : 'Aucune question pour le moment.'}
+                  {historySearch ? 'Aucune conversation trouvée.' : 'Aucune conversation. Posez une question pour démarrer.'}
                 </p>
               </div>
             ) : (
-              historyItems.map((item) => (
-                <HistoryItem
-                  key={item.id}
-                  item={item}
-                  onSelect={handleLoadFromHistory}
-                />
-              ))
+              visibleConversations.map((c) => {
+                const isActive = c.id === activeConvId
+                return (
+                  <button
+                    key={c.id}
+                    onClick={() => loadConversation(c.id)}
+                    className={cn(
+                      'group/conv w-full text-left flex items-start gap-2 px-2.5 py-2 rounded-lg transition-colors',
+                      isActive
+                        ? 'bg-brand-500/12 border border-brand-500/25'
+                        : 'hover:bg-[var(--surface-2)] border border-transparent',
+                    )}
+                  >
+                    <MessageSquarePlus size={13} className={cn('mt-0.5 shrink-0', isActive ? 'text-brand-500' : 'text-[var(--text-muted)]')} />
+                    <span className="flex-1 min-w-0">
+                      <span className={cn('block text-[12.5px] font-medium truncate', isActive ? 'text-[var(--text)]' : 'text-[var(--text)]')}>
+                        {c.title || 'Conversation'}
+                      </span>
+                      <span className="block text-[10.5px] text-[var(--text-muted)]">
+                        {convRelTime(c.updatedAt)}
+                        {c.messages ? ` · ${Math.ceil(c.messages.length / 2)} échange${Math.ceil(c.messages.length / 2) > 1 ? 's' : ''}` : ''}
+                      </span>
+                    </span>
+                    <span
+                      role="button"
+                      tabIndex={-1}
+                      onClick={(e) => deleteConversation(c.id, e)}
+                      title="Supprimer"
+                      className="shrink-0 p-1 rounded-md text-[var(--text-muted)] opacity-0 group-hover/conv:opacity-100 hover:text-red-500 hover:bg-red-500/10 transition-all"
+                    >
+                      <X size={12} />
+                    </span>
+                  </button>
+                )
+              })
             )}
           </div>
         </div>

@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import {
   Zap, TrendingDown, BarChart2, Leaf, Download,
   AlertTriangle, CheckCircle, Lightbulb, Eye,
-  Calendar, ArrowUpRight, X, Activity, DollarSign, Loader2,
+  Calendar, ArrowUpRight, X, Activity, DollarSign, Loader2, FileText,
 } from 'lucide-react'
 import {
   AreaChart, Area, BarChart, Bar, Cell,
@@ -14,8 +14,12 @@ import {
   getEnergyTopConsumers, getEnergyAnomalies,
   getEnergyHourly, getEnergyRecommendations,
 } from '../../api/dashboard'
+import { getEnergyBill } from '../../api/finance'
+import { getPageInsights } from '../../api/ai'
 import { getLCUs } from '../../api/lcus'
 import { cn } from '../../utils/helpers'
+import { generateEnergyAuditPdf } from '../../utils/energyAuditPdf'
+import toast from 'react-hot-toast'
 import AIPageInsights from '../../components/ai/AIPageInsights'
 import EnergyLampDrawer from '../../components/energy/EnergyLampDrawer'
 
@@ -173,6 +177,11 @@ export default function EnergyPage() {
     queryFn: getEnergyRecommendations,
     staleTime: 300_000,
   })
+  const { data: bill } = useQuery({
+    queryKey: ['energy-bill', days],
+    queryFn: () => getEnergyBill(days),
+    staleTime: 60_000,
+  })
   const { data: lcusRes } = useQuery({ queryKey: ['lcus'], queryFn: getLCUs })
 
   const lcus = useMemo(() => {
@@ -237,9 +246,13 @@ export default function EnergyPage() {
   const totalSav  = totalEst - totalReal
   const savPct    = totalEst > 0 ? (totalSav / totalEst) * 100 : 0
   const todayKwh  = chartData.length > 0 ? chartData[chartData.length - 1].réelle : 0
-  const costDH    = totalReal * TARIFF
-  const savDH     = totalSav  * TARIFF
+  // Facture réelle ONEE (mesure kWh × prix par poste horaire). Fallback sur le
+  // tarif plat si la facture n'est pas encore chargée.
+  const avgTariff = bill?.total_kwh > 0 ? bill.total_cost_dh / bill.total_kwh : TARIFF
+  const costDH    = bill?.total_cost_dh ?? (totalReal * TARIFF)
+  const savDH     = totalSav * avgTariff
   const co2Kg     = totalSav  * CO2_COEF
+  const measuredShare = bill?.measured_share ?? null
   const avgDim    = summary?.avg_intensity ?? 0
   const trend     = prevTotalKwh > 0 ? ((totalReal - prevTotalKwh) / prevTotalKwh) * 100 : null
 
@@ -265,6 +278,31 @@ export default function EnergyPage() {
 
   const chartInterval = Math.max(0, Math.floor(chartData.length / 8) - 1)
   const isFiltered    = lcuFilter !== 'Toutes' || zoneFilter !== 'Toutes'
+
+  // Génère le rapport d'audit énergétique PDF (données réelles + analyse IA en cache).
+  async function handleAuditPdf() {
+    await toast.promise(
+      (async () => {
+        let aiInsight = null
+        try {
+          const ins = await getPageInsights('energy', false) // 0 token : cache/rule-based
+          aiInsight = {
+            summary: ins?.summary || '',
+            analysis: ins?.analysis || '',
+            recommendations: (ins?.recommendations?.length
+              ? ins.recommendations
+              : (ins?.rule_recommendations || []).map((r) => r.title)).slice(0, 6),
+          }
+        } catch { /* rapport quand même généré sans IA */ }
+
+        await generateEnergyAuditPdf({
+          period, bill, summary, topConsumers,
+          costDH, savDH, co2Kg, avgDim, measuredShare, aiInsight,
+        })
+      })(),
+      { loading: 'Génération du rapport…', success: 'Rapport d\'audit généré', error: 'Erreur lors de la génération' },
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -311,6 +349,12 @@ export default function EnergyPage() {
           className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[12px] font-medium border border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-2)] transition-colors">
           <Download size={13} /> CSV
         </button>
+
+        <button
+          onClick={handleAuditPdf}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[12px] font-semibold border border-brand-500/30 bg-brand-500/10 text-brand-600 dark:text-brand-400 hover:bg-brand-500/20 transition-colors">
+          <FileText size={13} /> Rapport d'audit
+        </button>
       </div>
 
       {/* ── KPI cards ────────────────────────────────────── */}
@@ -321,9 +365,12 @@ export default function EnergyPage() {
         <KpiCard label="Aujourd'hui" value={`${todayKwh.toFixed(1)} kWh`}
           icon={Calendar} iconBg="bg-blue-500/10" iconColor="text-blue-500"
           sub="Dernier jour de la période" loading={dailyLoading} />
-        <KpiCard label="Coût estimé" value={`${costDH.toFixed(0)} DH`}
+        <KpiCard label="Coût réel (ONEE)" value={`${costDH.toFixed(0)} DH`}
           icon={DollarSign} iconBg="bg-amber-500/10" iconColor="text-amber-500"
-          sub={`Tarif ${TARIFF} DH/kWh`} loading={dailyLoading} />
+          sub={measuredShare != null
+            ? `Tarif horaire · ${Math.round(measuredShare * 100)}% mesuré`
+            : `≈ ${avgTariff.toFixed(2)} DH/kWh moyen`}
+          loading={dailyLoading} />
         <KpiCard label="Économies réalisées" value={`${totalSav.toFixed(0)} kWh`}
           icon={TrendingDown} iconBg="bg-green-500/10" iconColor="text-green-500"
           sub={`${savDH.toFixed(0)} DH économisés`}
@@ -338,6 +385,55 @@ export default function EnergyPage() {
           badge={{ label: '🌿 Vert', bg: 'rgba(16,185,129,0.12)', color: '#10b981' }}
           loading={dailyLoading} />
       </div>
+
+      {/* ── Facture ONEE par poste horaire ───────────────── */}
+      {bill?.lines?.length > 0 && (
+        <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <div>
+              <p className="text-[14px] font-semibold text-[var(--text)]">Facture énergie — tarification ONEE</p>
+              <p className="text-[12px] text-[var(--text-muted)] mt-0.5">
+                {period} · ventilation par poste horaire (heures pleines / creuses / pointe)
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-[20px] font-bold text-[var(--text)]">{costDH.toFixed(0)} DH</p>
+              <p className="text-[11px] text-[var(--text-muted)]">
+                {fmtKwh(bill.total_kwh)} · {bill.co2_kg?.toFixed(0)} kg CO₂
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {bill.lines.map((l) => {
+              const share = bill.total_cost_dh > 0 ? (l.cost_dh / bill.total_cost_dh) * 100 : 0
+              return (
+                <div key={l.period_key}
+                  className="rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3.5">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: l.color }} />
+                    <span className="text-[12px] font-semibold text-[var(--text)]">{l.label}</span>
+                  </div>
+                  <p className="text-[18px] font-bold text-[var(--text)]">{l.cost_dh.toFixed(0)} DH</p>
+                  <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
+                    {fmtKwh(l.kwh)} × {l.price_dh_per_kwh.toFixed(2)} DH/kWh
+                  </p>
+                  <div className="mt-2 h-1.5 rounded-full bg-[var(--border)] overflow-hidden">
+                    <div className="h-full rounded-full" style={{ width: `${share}%`, backgroundColor: l.color }} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          {measuredShare != null && (
+            <p className="text-[11px] text-[var(--text-muted)] mt-3">
+              {Math.round(measuredShare * 100)}% de la consommation est mesurée (le reste estimé depuis la puissance).
+              Les prix par poste sont configurables dans Paramètres.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* ── Main chart ───────────────────────────────────── */}
       <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-5">

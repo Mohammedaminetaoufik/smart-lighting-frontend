@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { getStoredToken } from '../context/AuthContext'
 
 // Separate client with 60s timeout for AI calls (LLM inference can be slow)
 // Also handles FastAPI's `detail` error field which the global client doesn't
@@ -6,6 +7,12 @@ const aiClient = axios.create({
   baseURL: '/api',
   headers: { 'Content-Type': 'application/json' },
   timeout: 60000,
+})
+
+aiClient.interceptors.request.use((config) => {
+  const token = getStoredToken()
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
 })
 
 aiClient.interceptors.response.use(
@@ -31,7 +38,7 @@ export const askAI = (payload) =>
     language: payload.language ?? 'fr',
     max_rows: payload.max_rows ?? 100,
     conversation_history: payload.conversation_history ?? null,
-  })
+  }, { timeout: 120000 }) // gros modèle : marge au-delà des 60 s par défaut
 
 export const getAISuggestions = () =>
   aiClient.get('/ai/suggestions')
@@ -48,9 +55,13 @@ export function askAIStream(payload, { onMeta, onToken, onDone, onError }) {
   const controller = new AbortController()
   const run = async () => {
     try {
+      const token = getStoredToken()
       const res = await fetch('/api/ai/query/stream', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         signal: controller.signal,
         body: JSON.stringify({
           question: payload.question,
@@ -104,6 +115,14 @@ export const getDailyDigest = (refresh = false) =>
 
 export const getAIHistory = (limit = 20, search = '') =>
   aiClient.get('/ai/history', { params: { limit, search } })
+
+// Feedback 👍/👎 sur une réponse IA (rating: 1 = utile, -1 = pas utile)
+export const sendAIFeedback = ({ rating, question, answer }) =>
+  aiClient.post('/ai/feedback', {
+    rating,
+    question: question ?? '',
+    answer_excerpt: (answer ?? '').slice(0, 2000),
+  })
 
 export const getPageInsights = (page, refresh = false) =>
   aiClient.get(`/ai/page-insights/${page}`, {

@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Map, Radio, Lightbulb, Settings2,
   Bell, ClipboardList, FlaskConical, Users,
   CheckSquare, Workflow, BarChart3, Server, ShieldAlert, Activity, Clock,
-  ChevronLeft, ChevronRight, Sparkles,
+  ChevronLeft, ChevronRight, Sparkles, UserCircle2,
 } from 'lucide-react'
 import { cn } from '../../utils/helpers'
 
@@ -18,6 +18,7 @@ const NAV = [
   { label: 'Alertes', icon: Bell, to: '/alerts' },
   { label: 'Bons de travail', icon: ClipboardList, to: '/workorders' },
   { label: "Profils d'éclairage", icon: Workflow, to: '/profiles' },
+  { label: 'Maintenance prédictive', icon: ShieldAlert, to: '/predictive-maintenance' },
   { label: 'Maintenance', icon: Clock, to: '/maintenance' },
   { divider: true, group: 'Analyse' },
   { label: 'Énergie', icon: BarChart3, to: '/energy' },
@@ -31,6 +32,8 @@ const NAV = [
   { divider: true, group: 'Outils' },
   { label: 'Simulateur IoT', icon: FlaskConical, to: '/simulator' },
   { label: 'Paramètres', icon: Settings2, to: '/settings' },
+  { divider: true, group: 'Compte' },
+  { label: 'Mon profil', icon: UserCircle2, to: '/profile' },
 ]
 
 export default function Sidebar({ mobileOpen, onMobileClose, collapsed, onToggleCollapse }) {

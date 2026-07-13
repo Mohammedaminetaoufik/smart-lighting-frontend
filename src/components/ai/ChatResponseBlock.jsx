@@ -3,73 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Sparkles, Copy, Check } from 'lucide-react'
 import { cn } from '../../utils/helpers'
-
-// Custom markdown components — dark theme
-const MD_COMPONENTS = {
-  p({ children }) {
-    return (
-      <p className="text-sm text-[var(--text)] leading-relaxed mb-3 last:mb-0">
-        {children}
-      </p>
-    )
-  },
-  strong({ children }) {
-    return <strong className="font-semibold text-[var(--text)]">{children}</strong>
-  },
-  em({ children }) {
-    return <em className="italic text-[var(--text-muted)]">{children}</em>
-  },
-  ul({ children }) {
-    return <ul className="my-2 space-y-1.5 pl-1">{children}</ul>
-  },
-  ol({ children }) {
-    return <ol className="my-2 space-y-1.5 pl-4 list-decimal">{children}</ol>
-  },
-  li({ children }) {
-    return (
-      <li className="flex items-start gap-2 text-sm text-[var(--text)]">
-        <span className="mt-[5px] w-1.5 h-1.5 rounded-full bg-brand-500 shrink-0" />
-        <span className="flex-1">{children}</span>
-      </li>
-    )
-  },
-  h3({ children }) {
-    return (
-      <h3 className="text-sm font-semibold text-[var(--text)] mt-4 mb-1.5 flex items-center gap-1.5">
-        <span className="w-1 h-3.5 rounded-full bg-brand-500 inline-block shrink-0" />
-        {children}
-      </h3>
-    )
-  },
-  h4({ children }) {
-    return <h4 className="text-sm font-semibold text-[var(--text-muted)] mt-3 mb-1">{children}</h4>
-  },
-  blockquote({ children }) {
-    return (
-      <blockquote className="border-l-2 border-amber-500/40 pl-3 my-2 text-[var(--text-muted)] italic bg-amber-500/5 rounded-r-lg py-1.5 pr-2">
-        {children}
-      </blockquote>
-    )
-  },
-  code({ children, className }) {
-    const isBlock = className?.includes('language-')
-    if (isBlock) {
-      return (
-        <pre className="bg-[var(--surface-2)] border border-[var(--border)] rounded-lg p-3 my-2 overflow-x-auto">
-          <code className="text-xs font-mono text-[var(--text)]">{children}</code>
-        </pre>
-      )
-    }
-    return (
-      <code className="bg-[var(--surface-2)] border border-[var(--border)] px-1.5 py-0.5 rounded text-xs font-mono text-brand-400">
-        {children}
-      </code>
-    )
-  },
-  hr() {
-    return <hr className="border-[var(--border)] my-3" />
-  },
-}
+import { normalizeMarkdown, AI_MD_COMPONENTS } from './markdown'
 
 // Word-by-word animated reveal
 function AnimatedMarkdown({ text, speed = 18 }) {
@@ -120,10 +54,10 @@ function AnimatedMarkdown({ text, speed = 18 }) {
     )
   }
 
-  // Animation done — render full markdown
+  // Animation done — render full markdown (normalized so tables parse)
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
-      {text}
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={AI_MD_COMPONENTS}>
+      {normalizeMarkdown(text)}
     </ReactMarkdown>
   )
 }

@@ -3,6 +3,14 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
+  // Garantir une seule instance de React (évite l'erreur framer-motion
+  // "Cannot read properties of null (reading 'useContext')").
+  resolve: {
+    dedupe: ['react', 'react-dom'],
+  },
+  optimizeDeps: {
+    include: ['react', 'react-dom', 'framer-motion'],
+  },
   server: {
     port: 5173,
     strictPort: true,  // fail fast if 5173 is taken instead of silently moving to 5174/5175

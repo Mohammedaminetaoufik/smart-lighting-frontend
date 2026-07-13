@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Sun, Moon, Save, Thermometer, Zap, Clock, Database, Radio } from 'lucide-react'
+import { Sun, Moon, Save, Thermometer, Zap, Clock, Database, Radio, Leaf } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { useTheme } from '../../context/ThemeContext'
@@ -7,7 +7,109 @@ import Card, { CardHeader } from '../../components/ui/Card'
 import Button from '../../components/ui/Button'
 import { PageLoader } from '../../components/ui/Spinner'
 import { getSystemConfig, updateSystemConfig } from '../../api/system'
+import { getTariffs, updateTariffs } from '../../api/finance'
 import { cn } from '../../utils/helpers'
+
+/* ── Tarification énergie ONEE ─────────────────────────────── */
+function TariffSettingsCard() {
+  const qc = useQueryClient()
+  const [draft, setDraft] = useState(null)
+
+  const { data: cfg, isLoading } = useQuery({ queryKey: ['energy-tariffs'], queryFn: getTariffs })
+
+  useEffect(() => { if (cfg) setDraft(structuredClone(cfg)) }, [cfg])
+
+  const mut = useMutation({
+    mutationFn: updateTariffs,
+    onSuccess: () => {
+      toast.success('Tarification enregistrée')
+      qc.invalidateQueries({ queryKey: ['energy-tariffs'] })
+      qc.invalidateQueries({ queryKey: ['energy-bill'] })
+      qc.invalidateQueries({ queryKey: ['finance-summary'] })
+    },
+    onError: (e) => toast.error(e.message || 'Erreur'),
+  })
+
+  if (isLoading || !draft) {
+    return (
+      <Card>
+        <CardHeader title="Tarification énergie (ONEE)" subtitle="Chargement…" />
+      </Card>
+    )
+  }
+
+  const setPrice = (key, val) =>
+    setDraft((d) => ({
+      ...d,
+      tariffs: d.tariffs.map((t) => (t.period_key === key ? { ...t, price_dh_per_kwh: val } : t)),
+    }))
+
+  const dirty = JSON.stringify(draft) !== JSON.stringify(cfg)
+
+  const save = () => {
+    const payload = {
+      ...draft,
+      tariffs: draft.tariffs.map((t) => ({ ...t, price_dh_per_kwh: parseFloat(t.price_dh_per_kwh) || 0 })),
+      co2_factor_kg_per_kwh: parseFloat(draft.co2_factor_kg_per_kwh) || 0,
+    }
+    mut.mutate(payload)
+  }
+
+  return (
+    <Card>
+      <CardHeader
+        title="Tarification énergie (ONEE)"
+        subtitle="Prix par poste horaire — utilisés pour la facture réelle en DH. À renseigner selon votre contrat ONEE."
+      />
+      <div className="space-y-3">
+        {draft.tariffs.map((t) => (
+          <div key={t.period_key} className="flex items-center gap-3">
+            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: t.color }} />
+            <div className="flex-1">
+              <p className="text-[13px] font-medium text-[var(--text)]">{t.label}</p>
+              <p className="text-[11px] text-[var(--text-muted)]">{t.period_key}</p>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <input
+                type="number" min="0" step="0.01"
+                value={t.price_dh_per_kwh}
+                onChange={(e) => setPrice(t.period_key, e.target.value)}
+                className="w-24 px-3 py-1.5 text-sm bg-[var(--surface-2)] border border-[var(--border)] rounded-lg text-[var(--text)] font-mono focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
+              />
+              <span className="text-[11px] text-[var(--text-muted)]">DH/kWh</span>
+            </div>
+          </div>
+        ))}
+
+        <div className="flex items-center gap-3 pt-3 border-t border-[var(--border)]">
+          <div className="w-9 h-9 rounded-xl bg-emerald-500/10 flex items-center justify-center shrink-0">
+            <Leaf size={14} className="text-emerald-500" />
+          </div>
+          <div className="flex-1">
+            <p className="text-[13px] font-medium text-[var(--text)]">Facteur d'émission CO₂</p>
+            <p className="text-[11px] text-[var(--text-muted)]">kg CO₂ par kWh (réseau électrique marocain)</p>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="number" min="0" step="0.01"
+              value={draft.co2_factor_kg_per_kwh}
+              onChange={(e) => setDraft((d) => ({ ...d, co2_factor_kg_per_kwh: e.target.value }))}
+              className="w-24 px-3 py-1.5 text-sm bg-[var(--surface-2)] border border-[var(--border)] rounded-lg text-[var(--text)] font-mono focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500"
+            />
+            <span className="text-[11px] text-[var(--text-muted)]">kg/kWh</span>
+          </div>
+        </div>
+
+        <div className="flex justify-end pt-2 border-t border-[var(--border)]">
+          <Button onClick={save} disabled={!dirty} loading={mut.isPending}>
+            <Save size={13} />
+            {dirty ? 'Enregistrer les tarifs' : 'Aucune modification'}
+          </Button>
+        </div>
+      </div>
+    </Card>
+  )
+}
 
 const CONFIG_FIELDS = [
   {
@@ -148,6 +250,9 @@ export default function SettingsPage() {
           </div>
         </div>
       </Card>
+
+      {/* Tarification énergie ONEE */}
+      <TariffSettingsCard />
 
       {/* Backend info */}
       <Card>

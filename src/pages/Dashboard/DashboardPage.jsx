@@ -7,7 +7,6 @@ import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
 } from 'recharts'
-import StatCard from '../../components/ui/StatCard'
 import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import { StatCardSkeleton, ChartSkeleton } from '../../components/ui/Skeleton'
@@ -18,6 +17,12 @@ import { runAllCalculator } from '../../api/calculator'
 import { QK } from '../../lib/queryClient'
 import { severityColor, labelSeverity, timeAgo } from '../../utils/helpers'
 import AIDashboardInsights from '../../components/ai/AIDashboardInsights'
+import FinancialSummaryCard from '../../components/dashboard/FinancialSummaryCard'
+import SunScheduleCard from '../../components/dashboard/SunScheduleCard'
+import AnimatedStatCard from '../../components/dashboard/AnimatedStatCard'
+import { AnimatePresence } from 'framer-motion'
+import { AnimatedPage, Stagger, StaggerItem, SlideUp, FadeIn, motion } from '../../components/animations'
+import { backdropVariants, modalVariants } from '../../lib/animations'
 
 /* ── Reusable donut chart ─────────────────────────────────── */
 function DonutChart({ title, subtitle, data, total }) {
@@ -384,15 +389,20 @@ function StatDetailModal({ type, stats, alertCounts, energy, daily, allAlerts, l
   const savingW    = energy?.estimated_saving_w        ?? 0
 
   return (
-    <div className="fixed inset-0 z-[800] flex items-center justify-center p-4" onClick={onClose}>
+    <motion.div
+      className="fixed inset-0 z-[800] flex items-center justify-center p-4"
+      onClick={onClose}
+      variants={backdropVariants} initial="initial" animate="animate" exit="exit"
+    >
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
 
       {/* Panel */}
-      <div
+      <motion.div
         className="relative z-10 w-full max-w-2xl max-h-[80vh] flex flex-col rounded-2xl shadow-2xl"
         style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
         onClick={(e) => e.stopPropagation()}
+        variants={modalVariants} initial="initial" animate="animate" exit="exit"
       >
         {/* Header */}
         <div className="flex items-center gap-3 px-5 py-4 border-b shrink-0" style={{ borderColor: 'var(--border)' }}>
@@ -545,8 +555,8 @@ function StatDetailModal({ type, stats, alertCounts, energy, daily, allAlerts, l
           )}
 
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   )
 }
 
@@ -611,14 +621,15 @@ export default function DashboardPage() {
 
   if (statsLoading) {
     return (
-      <div className="space-y-5">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCardSkeleton /><StatCardSkeleton /><StatCardSkeleton /><StatCardSkeleton />
+      <FadeIn className="space-y-5">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          <StatCardSkeleton /><StatCardSkeleton /><StatCardSkeleton />
+          <StatCardSkeleton /><StatCardSkeleton /><StatCardSkeleton />
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <ChartSkeleton /><ChartSkeleton />
         </div>
-      </div>
+      </FadeIn>
     )
   }
 
@@ -642,58 +653,64 @@ export default function DashboardPage() {
   ]
 
   return (
-    <div className="space-y-6">
+    <AnimatedPage className="space-y-6">
 
       {/* ── AI Dashboard Insights (merged digest + page insights) ── */}
-      <AIDashboardInsights />
+      <FadeIn className="ai-halo"><AIDashboardInsights /></FadeIn>
 
       {/* ── KPI stat cards ────────────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        <StatCard icon={Lightbulb} label="Total lampadaires" value={total}
-          iconBg="bg-brand-500/10" iconColor="text-brand-500"
-          onClick={() => setModal('total')} />
-        <StatCard icon={Wifi}      label="En ligne"          value={online}
-          iconBg="bg-green-500/10" iconColor="text-green-500"
-          onClick={() => setModal('online')} />
-        <StatCard icon={WifiOff}   label="Hors ligne"        value={offline}
-          iconBg="bg-red-500/10"   iconColor="text-red-500"
-          onClick={() => setModal('offline')} />
-        <StatCard icon={Wrench}    label="Maintenance"       value={maintenance}
-          iconBg="bg-amber-500/10" iconColor="text-amber-500"
-          onClick={() => setModal('maintenance')} />
-        <StatCard icon={Bell}      label="Alertes ouvertes"  value={alertCounts?.total ?? 0}
-          iconBg="bg-blue-500/10"  iconColor="text-blue-500"
-          onClick={() => setModal('alerts')} />
-        <StatCard icon={Zap}       label="Énergie aujourd'hui" value={`${todayKwh.toFixed(1)} kWh`}
-          iconBg="bg-slate-500/10 dark:bg-slate-400/10" iconColor="text-slate-600 dark:text-slate-400"
-          onClick={() => setModal('energy')} />
-      </div>
+      <Stagger className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <AnimatedStatCard icon={Lightbulb} label="Total lampadaires" value={total}
+          accent="#22c55e" onClick={() => setModal('total')} />
+        <AnimatedStatCard icon={Wifi} label="En ligne" value={online}
+          accent="#22c55e" onClick={() => setModal('online')} />
+        <AnimatedStatCard icon={WifiOff} label="Hors ligne" value={offline}
+          accent="#ef4444" onClick={() => setModal('offline')} />
+        <AnimatedStatCard icon={Wrench} label="Maintenance" value={maintenance}
+          accent="#f59e0b" onClick={() => setModal('maintenance')} />
+        <AnimatedStatCard icon={Bell} label="Alertes ouvertes" value={alertCounts?.total ?? 0}
+          accent="#3b82f6" onClick={() => setModal('alerts')} />
+        <AnimatedStatCard icon={Zap} label="Énergie aujourd'hui" value={todayKwh} decimals={1} suffix=" kWh"
+          accent="#8b5cf6" onClick={() => setModal('energy')} />
+      </Stagger>
+
+      {/* ── Synthèse financière + calendrier astronomique ─── */}
+      <SlideUp className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <FinancialSummaryCard />
+        <SunScheduleCard />
+      </SlideUp>
 
       {/* ── Energy chart ──────────────────────────────────── */}
-      <EnergyChart daily={daily} energy={energy} />
+      <SlideUp><EnergyChart daily={daily} energy={energy} /></SlideUp>
 
       {/* ── Charts row ────────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <DonutChart
-          title="Répartition des lampadaires"
-          subtitle="Par état de connectivité"
-          data={lampStatusData}
-          total={total}
-        />
-        <AlertSeverityChart data={alertSeverityData} />
-        <NetworkHealthCard
-          health={health}
-          online={online}
-          total={total}
-          alertCounts={alertCounts}
-        />
-      </div>
+      <Stagger className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <StaggerItem className="card-hover-glow rounded-2xl">
+          <DonutChart
+            title="Répartition des lampadaires"
+            subtitle="Par état de connectivité"
+            data={lampStatusData}
+            total={total}
+          />
+        </StaggerItem>
+        <StaggerItem className="card-hover-glow rounded-2xl">
+          <AlertSeverityChart data={alertSeverityData} />
+        </StaggerItem>
+        <StaggerItem className="card-hover-glow rounded-2xl">
+          <NetworkHealthCard
+            health={health}
+            online={online}
+            total={total}
+            alertCounts={alertCounts}
+          />
+        </StaggerItem>
+      </Stagger>
 
       {/* ── Bottom row: Calculator + Alerts ─────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <Stagger className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
         {/* Calculator */}
-        <div className="rounded-2xl bg-[var(--surface)] border border-[var(--border)] p-5 flex flex-col justify-between">
+        <StaggerItem className="rounded-2xl bg-[var(--surface)] border border-[var(--border)] p-5 flex flex-col justify-between card-hover-glow">
           <div className="flex items-center gap-3 mb-4">
             <div className="w-9 h-9 rounded-xl bg-brand-500/10 flex items-center justify-center shrink-0">
               <TrendingUp size={16} className="text-brand-500" />
@@ -709,10 +726,10 @@ export default function DashboardPage() {
           <Button className="w-full" loading={runAllMut.isPending} onClick={() => runAllMut.mutate()}>
             <Play size={14} /> Exécuter pour tous
           </Button>
-        </div>
+        </StaggerItem>
 
         {/* Recent alerts — compact 2-column list */}
-        <div className="lg:col-span-2 rounded-2xl bg-[var(--surface)] border border-[var(--border)] overflow-hidden">
+        <StaggerItem className="lg:col-span-2 rounded-2xl bg-[var(--surface)] border border-[var(--border)] overflow-hidden card-hover-glow">
           <div className="px-5 py-3.5 border-b border-[var(--border)] flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Bell size={13} className="text-[var(--text-muted)]" />
@@ -738,13 +755,16 @@ export default function DashboardPage() {
             </div>
           ) : (
             <>
-              <div className="divide-y divide-[var(--border)]">
+              <Stagger className="divide-y divide-[var(--border)]">
                 {alerts.slice(0, 5).map((a) => {
                   const col = severityColor(a.severity)
+                  const isCritical = a.severity === 'critical'
                   return (
-                    <div key={a.id}
-                      className="flex items-center gap-3 px-5 py-2.5 hover:bg-[var(--surface-2)] transition-colors">
-                      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: col.text }} />
+                    <StaggerItem key={a.id}
+                      className={`relative flex items-center gap-3 px-5 py-2.5 hover:bg-[var(--surface-2)] transition-colors ${isCritical ? 'bg-red-500/[0.03]' : ''}`}>
+                      {isCritical && <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-red-500" />}
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isCritical ? 'pulse-critical' : ''}`}
+                        style={{ background: col.text }} />
                       <Badge label={labelSeverity(a.severity)} bg={col.bg} text={col.text} />
                       {a.lampadaire_reference && (
                         <span className="text-[11px] font-mono text-[var(--text-muted)] shrink-0">
@@ -755,10 +775,10 @@ export default function DashboardPage() {
                       <span className="text-[11px] text-[var(--text-muted)] shrink-0 whitespace-nowrap">
                         {timeAgo(a.created_at)}
                       </span>
-                    </div>
+                    </StaggerItem>
                   )
                 })}
-              </div>
+              </Stagger>
               <div className="px-5 py-3 border-t border-[var(--border)]">
                 <Link to="/alerts"
                   className="flex items-center justify-center gap-2 w-full py-2 rounded-xl text-[12px] font-medium text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-2)] transition-colors">
@@ -768,23 +788,26 @@ export default function DashboardPage() {
               </div>
             </>
           )}
-        </div>
-      </div>
+        </StaggerItem>
+      </Stagger>
 
 
       {/* ── Stat detail modal ─────────────────────────────── */}
-      {modal && (
-        <StatDetailModal
-          type={modal}
-          stats={stats}
-          alertCounts={alertCounts}
-          energy={energy}
-          daily={daily}
-          allAlerts={allAlerts}
-          lamps={lamps}
-          onClose={() => setModal(null)}
-        />
-      )}
-    </div>
+      <AnimatePresence>
+        {modal && (
+          <StatDetailModal
+            key="stat-modal"
+            type={modal}
+            stats={stats}
+            alertCounts={alertCounts}
+            energy={energy}
+            daily={daily}
+            allAlerts={allAlerts}
+            lamps={lamps}
+            onClose={() => setModal(null)}
+          />
+        )}
+      </AnimatePresence>
+    </AnimatedPage>
   )
 }
