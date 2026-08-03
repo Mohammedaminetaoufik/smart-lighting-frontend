@@ -3,12 +3,14 @@ import { useQuery } from '@tanstack/react-query'
 import {
   Sparkles, X, RefreshCw, AlertTriangle, CheckCircle,
   Info, Lightbulb, Radio, Wifi, WifiOff, Wrench,
-  Thermometer, Zap, Activity, MapPin, Clock,
+  Thermometer, Zap, Activity, MapPin, Clock, Globe2,
 } from 'lucide-react'
 import { getEntityInsights } from '../../api/ai'
 import TypewriterText from './TypewriterText'
 import ScoreBadge from './ScoreBadge'
 import { RecommendationList } from './RecommendationCard'
+import AIQualityMeta from './AIQualityMeta'
+import GroundedRecommendations from './GroundedRecommendations'
 import { cn } from '../../utils/helpers'
 
 /* ── Priority badge ──────────────────────────────────────────── */
@@ -139,8 +141,8 @@ function PanelHeader({ entityRef, entityLabel, data, isLoading, isFetching, onRe
         {data && !isLoading && <PriorityBadge priority={data.priority} />}
         <button
           onClick={onRefresh}
-          disabled={isFetching}
-          title="Régénérer l'analyse"
+          disabled={isFetching || data?.ai_enabled === false}
+          title={data?.ai_enabled === false ? "IA générative désactivée dans le Centre IA" : "Régénérer l'analyse"}
           className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-2)] transition-colors disabled:opacity-40"
         >
           <RefreshCw size={13} className={isFetching ? 'animate-spin' : ''} />
@@ -160,6 +162,7 @@ function PanelHeader({ entityRef, entityLabel, data, isLoading, isFetching, onRe
 
 function PanelBody({ data, isLoading, isError, error, entityType, isFetching, onGenerate }) {
   const llmGenerated = data && !!data.generated_at && !!data.summary
+  const aiDisabled   = data?.ai_enabled === false
   const generating   = isFetching && !llmGenerated
   const ruleRecs     = data?.recommendations ?? []
   return (
@@ -232,6 +235,11 @@ function PanelBody({ data, isLoading, isError, error, entityType, isFetching, on
                 <div className="h-3 bg-[var(--surface-2)] rounded-full w-5/6" />
               </div>
             </div>
+          ) : !llmGenerated && aiDisabled ? (
+            <div className="flex items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/5 p-3 text-[12px] text-amber-600 dark:text-amber-400">
+              <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+              <span>IA générative désactivée dans le Centre IA. Ce diagnostic repose uniquement sur les données SQL et les règles métier.</span>
+            </div>
           ) : !llmGenerated ? (
             <button
               onClick={onGenerate}
@@ -244,7 +252,15 @@ function PanelBody({ data, isLoading, isError, error, entityType, isFetching, on
           ) : (
             <>
               <div className="rounded-xl border border-brand-500/20 bg-brand-500/5 p-4 space-y-4">
-                <SectionHeader label="Diagnostic IA" />
+                <div className="flex items-start justify-between gap-3">
+                  <SectionHeader label="Diagnostic IA" />
+                  {data.web?.sources?.length > 0 && (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-cyan-500/25 bg-cyan-500/10 px-2 py-1 text-[9px] font-semibold text-cyan-500">
+                      <Globe2 size={10} />
+                      Enrichi par le web
+                    </span>
+                  )}
+                </div>
 
                 <div>
                   <p className="text-[9px] font-semibold text-[var(--text-muted)] uppercase tracking-widest mb-1.5">Résumé</p>
@@ -264,13 +280,26 @@ function PanelBody({ data, isLoading, isError, error, entityType, isFetching, on
 
                 {data.recommendation && (
                   <div>
-                    <p className="text-[9px] font-semibold text-[var(--text-muted)] uppercase tracking-widest mb-1.5">Recommandation</p>
+                    <p className="text-[9px] font-semibold text-[var(--text-muted)] uppercase tracking-widest mb-1.5">
+                      {data.web?.sources?.length > 0 ? 'Recommandation ' : 'Recommandation'}
+                    </p>
                     <p className="text-[12px] text-[var(--text)] leading-relaxed font-medium">
                       <TypewriterText text={data.recommendation} speed={10} showCursor={false} />
                     </p>
                   </div>
                 )}
+
+                <AIQualityMeta
+                  confidence={data.confidence}
+                  confidenceBasis={data.confidence_basis}
+                  warnings={[...(data.quality_warnings ?? []), data.web?.warning].filter(Boolean)}
+                  sources={data.sources}
+                  webSources={data.web?.sources}
+                  compact
+                />
               </div>
+
+              <GroundedRecommendations recommendations={data.grounded_recommendations} />
 
               {/* ── 3. Suggested Actions ─────────────────────── */}
               {data.suggested_actions?.length > 0 && (
@@ -286,6 +315,7 @@ function PanelBody({ data, isLoading, isError, error, entityType, isFetching, on
                   </ul>
                 </div>
               )}
+
             </>
           )}
 
@@ -295,7 +325,7 @@ function PanelBody({ data, isLoading, isError, error, entityType, isFetching, on
               <div className="flex items-center gap-2">
                 <Info size={10} className="text-[var(--text-muted)]" />
                 <span className="text-[10px] text-[var(--text-muted)]">
-                  Confiance : {Math.round((data.confidence ?? 0) * 100)}% · Llama 3
+                  MAADEN IA · résultat à valider par un opérateur
                 </span>
               </div>
               {data.cached && (

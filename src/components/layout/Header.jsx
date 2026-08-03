@@ -17,12 +17,8 @@ const PAGE_TITLES = {
   '/workorders':   'Bons de travail',
   '/profiles':     'Profils d\'éclairage',
   '/energy':       'Analyse énergétique',
-  '/simulator':    'Simulateur IoT',
-  '/admin':         'Infrastructure',
-  '/controllers':   'Contrôleurs',
   '/users':         'Utilisateurs',
   '/audit-log':     'Journal d\'audit',
-  '/system-health': 'État du système',
   '/maintenance':   'Fenêtres de maintenance',
   '/settings':      'Paramètres',
   '/profile':       'Mon profil',
@@ -127,12 +123,12 @@ function ChangePasswordModal({ onClose }) {
   )
 }
 
-export default function Header({ onMenuClick, alertCount = 0 }) {
+export default function Header({ onMenuClick }) {
   const { theme, toggle } = useTheme()
   const { user, logout }  = useAuth()
   const { pathname }      = useLocation()
   const navigate          = useNavigate()
-  const title             = PAGE_TITLES[pathname] || 'Smart Lighting'
+  const title             = PAGE_TITLES[pathname] || 'MAADEN Smart Controlling'
 
   const [menuOpen,   setMenuOpen]   = useState(false)
   const [changePwd,  setChangePwd]  = useState(false)
@@ -209,7 +205,7 @@ export default function Header({ onMenuClick, alertCount = 0 }) {
                 </button>
                 <div className="border-t border-[var(--border)] my-1" />
                 <button
-                  onClick={() => { logout(); navigate('/login', { replace: true }) }}
+                  onClick={async () => { await logout(); navigate('/login', { replace: true }) }}
                   className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-red-500 hover:bg-red-500/10 transition-colors"
                 >
                   <LogOut size={14} />

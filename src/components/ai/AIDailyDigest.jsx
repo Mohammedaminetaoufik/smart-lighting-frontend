@@ -6,6 +6,8 @@ import {
 } from 'lucide-react'
 import { getDailyDigest } from '../../api/ai'
 import { cn } from '../../utils/helpers'
+import AIQualityMeta from './AIQualityMeta'
+import GroundedRecommendations from './GroundedRecommendations'
 
 const PRIORITY = {
   low:      { label: 'Faible',   bg: 'bg-slate-500/15',  text: 'text-slate-400',  border: 'border-slate-500/25' },
@@ -100,7 +102,8 @@ export default function AIDailyDigest() {
 
           <button
             onClick={() => setRefreshKey((k) => k + 1)}
-            disabled={isFetching}
+            disabled={isFetching || data?.ai_enabled === false}
+            title={data?.ai_enabled === false ? "IA générative désactivée dans le Centre IA" : "Régénérer la synthèse"}
             className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-2)] transition-colors disabled:opacity-40"
           >
             <RefreshCw size={13} className={isFetching ? 'animate-spin' : ''} />
@@ -129,6 +132,13 @@ export default function AIDailyDigest() {
 
           {data && !isLoading && (
             <div className="p-5 space-y-5">
+
+              {data.ai_enabled === false && (
+                <div className="flex items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/5 p-3 text-[12px] text-amber-600 dark:text-amber-400">
+                  <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                  <span>IA générative désactivée dans le Centre IA. Seuls les indicateurs et les règles métier restent disponibles.</span>
+                </div>
+              )}
 
               {/* KPI Chips */}
               <div className="flex flex-wrap gap-2">
@@ -159,23 +169,35 @@ export default function AIDailyDigest() {
               </div>
 
               {/* Summary */}
-              <div>
+              {data.summary && <div>
                 <p className="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1.5">
                   Résumé
                 </p>
                 <p className="text-[14px] font-medium text-[var(--text)] leading-relaxed">{data.summary}</p>
-              </div>
+              </div>}
+
+              {data.llm_available && (
+                <AIQualityMeta
+                  confidence={data.confidence}
+                  confidenceBasis={data.confidence_basis}
+                  warnings={[...(data.quality_warnings ?? []), data.web?.warning].filter(Boolean)}
+                  sources={data.sources}
+                  webSources={data.web?.sources}
+                />
+              )}
 
               {/* Analysis */}
-              <div>
+              {data.analysis && <div>
                 <p className="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1.5">
                   Analyse métier
                 </p>
                 <p className="text-[13px] text-[var(--text-muted)] leading-relaxed whitespace-pre-wrap">{data.analysis}</p>
-              </div>
+              </div>}
+
+              <GroundedRecommendations recommendations={data.grounded_recommendations} title="Actions SQL + RAG + Web" />
 
               {/* Recommendations */}
-              <div>
+              {data.recommendations?.length > 0 && <div>
                 <p className="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2.5">
                   Actions recommandées
                 </p>
@@ -187,14 +209,14 @@ export default function AIDailyDigest() {
                     </li>
                   ))}
                 </ul>
-              </div>
+              </div>}
 
               {/* Footer */}
               <div className="flex items-center justify-between pt-3 border-t border-[var(--border)]">
                 <div className="flex items-center gap-2">
                   <Info size={10} className="text-[var(--text-muted)]" />
                   <span className="text-[10px] text-[var(--text-muted)]">
-                    Modèle : Llama 3 · Confiance : {Math.round((data.confidence ?? 0) * 100)}%
+                    MAADEN IA · résultat à valider par un opérateur
                   </span>
                 </div>
                 <div className="text-[10px] text-[var(--text-muted)] bg-[var(--surface-2)] px-2 py-0.5 rounded-full">

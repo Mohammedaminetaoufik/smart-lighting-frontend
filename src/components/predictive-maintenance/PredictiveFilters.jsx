@@ -14,6 +14,9 @@ const FAULT_TYPES = [
   { value: 'underpower', label: 'Sous-consommation' },
   { value: 'leakage', label: 'Fuite de courant' },
   { value: 'overtemp', label: 'Surchauffe' },
+  { value: 'power_factor', label: 'Dégradation du facteur de puissance' },
+  { value: 'unstable_current', label: 'Instabilité du courant' },
+  { value: 'intermittent_communication', label: 'Communication intermittente' },
 ]
 
 function Select({ label, value, onChange, options, allLabel = 'Tous' }) {
@@ -33,7 +36,7 @@ function Select({ label, value, onChange, options, allLabel = 'Tous' }) {
 
 export default function PredictiveFilters({ filters, setFilters, zones = [], lcus = [], onReset }) {
   const set = (k, v) => setFilters((f) => ({ ...f, [k]: v }))
-  const hasActive = filters.zone !== 'all' || filters.lcu !== 'all' || filters.riskLevel !== 'all' ||
+  const hasActive = filters.periodHours !== 30 * 24 || filters.zone !== 'all' || filters.lcu !== 'all' || filters.riskLevel !== 'all' ||
     filters.faultType !== 'all' || filters.online !== 'all' || filters.freshness !== 'all' || filters.search
 
   return (
@@ -45,6 +48,7 @@ export default function PredictiveFilters({ filters, setFilters, zones = [], lcu
           <div className="flex items-center gap-1 p-0.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)]">
             {PERIODS.map((p) => (
               <button key={p.value} onClick={() => set('periodHours', p.value)}
+                aria-pressed={filters.periodHours === p.value}
                 className={`px-2.5 py-1 rounded-md text-[11.5px] font-medium transition-colors ${filters.periodHours === p.value ? 'bg-brand-500 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text)]'}`}>
                 {p.label}
               </button>

@@ -4,9 +4,16 @@ import PredictionConfidence from './PredictionConfidence'
 import { RISK_META } from '../../services/predictiveMaintenanceService'
 
 // Les 4 KPI de la maintenance prédictive.
-export default function PredictiveKpiGrid({ summary, distribution, loading, error }) {
+export default function PredictiveKpiGrid({ summary, distribution, trend = [], loading, error }) {
   const s = summary || {}
   const pct = s.total_lamp_posts > 0 ? Math.round((s.at_risk_count / s.total_lamp_posts) * 100) : 0
+  const midpoint = Math.floor(trend.length / 2)
+  const anomalyCount = (rows) => rows.reduce((sum, point) => sum + (point.critical || 0) + (point.high || 0) + (point.moderate || 0), 0)
+  const previousAnomalies = anomalyCount(trend.slice(0, midpoint))
+  const currentAnomalies = anomalyCount(trend.slice(midpoint))
+  const periodDelta = previousAnomalies > 0
+    ? Math.round(((currentAnomalies - previousAnomalies) / previousAnomalies) * 100)
+    : currentAnomalies > 0 ? 100 : 0
 
   // Type de panne dominant (depuis la distribution)
   const dominant = (() => {
@@ -22,6 +29,8 @@ export default function PredictiveKpiGrid({ summary, distribution, loading, erro
         icon={ShieldAlert} accent="#ef4444" loading={loading} error={error}
         label="Lampadaires à risque"
         value={s.at_risk_count ?? 0}
+        delta={trend.length > 1 ? periodDelta : undefined}
+        deltaLabel="% vs période préc."
         tooltip="Lampadaires présentant un risque de défaillance (score ≥ 50 %)."
       >
         <div className="flex flex-wrap items-center gap-2 text-[10.5px]">
@@ -43,6 +52,8 @@ export default function PredictiveKpiGrid({ summary, distribution, loading, erro
         icon={CalendarClock} accent="#f97316" loading={loading} error={error}
         label="Pannes prévues à 30 jours"
         value={s.predicted_failures_30d ?? 0}
+        delta={trend.length > 1 ? periodDelta : undefined}
+        deltaLabel="% vs période préc."
         tooltip="Nombre de défaillances estimées dans les 30 prochains jours (échéance ≤ 30 j)."
       >
         <p className="text-[10.5px] text-[var(--text-muted)]">
@@ -50,12 +61,12 @@ export default function PredictiveKpiGrid({ summary, distribution, loading, erro
         </p>
       </PredictiveKpiCard>
 
-      {/* 3. Confiance moyenne du modèle */}
+      {/* 3. Fiabilité moyenne du moteur de règles */}
       <PredictiveKpiCard
         icon={Gauge} accent="#3b82f6" loading={loading} error={error}
-        label="Confiance moyenne du modèle"
-        value={<PredictionConfidence value={s.average_model_confidence ?? 0} />}
-        tooltip="Confiance moyenne des prédictions, réduite quand la télémétrie est ancienne."
+        label="Fiabilité moyenne du score"
+        value={<PredictionConfidence value={s.average_rule_reliability ?? s.average_model_confidence ?? 0} />}
+        tooltip="Indice déterministe des règles, réduit quand la télémétrie est ancienne. Ce n'est pas une probabilité ML."
       />
 
       {/* 4. Interventions prioritaires */}

@@ -32,18 +32,22 @@ export function PredictiveErrorState({ message = 'Impossible de charger les donn
   )
 }
 
-export function PredictiveSkeleton({ rows = 6 }) {
+export function PredictiveSkeleton({ rows = 6, tableOnly = false }) {
   return (
     <div className="animate-pulse" aria-busy="true" aria-label="Chargement">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="h-28 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)]" />
-        ))}
-      </div>
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
-        <div className="h-64 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)]" />
-        <div className="h-64 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)]" />
-      </div>
+      {!tableOnly && (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="h-28 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)]" />
+            ))}
+          </div>
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
+            <div className="h-64 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)]" />
+            <div className="h-64 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)]" />
+          </div>
+        </>
+      )}
       <div className="rounded-2xl border border-[var(--border)] overflow-hidden">
         <div className="h-11 bg-[var(--surface-2)] border-b border-[var(--border)]" />
         {Array.from({ length: rows }).map((_, i) => (

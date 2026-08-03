@@ -41,14 +41,25 @@ export function normalizeMarkdown(text) {
   let t = String(text).replace(/\r\n/g, '\n')
 
   // Headings must start their own line: "texte### Titre" → "texte\n\n### Titre"
-  t = t.replace(/([^\n])(#{1,6}\s)/g, '$1\n\n$2')
+  t = t.replace(/([^#\n])(#{1,6}\s)/g, '$1\n\n$2')
+
+  // Recover the recurring answer sections even when a model glues their title
+  // to the previous paragraph (or to the first numbered recommendation).
+  const sectionPattern = /(^|[\n.!?])\s*(?:\*\*)?(Constat principal|Analyse métier|Implications opérationnelles|Actions? recommandées?|Recommandations?|Conclusion(?: actionnable)?|Résultat|Formule utilisée|Interprétation métier|Limites\s*\/\s*hypothèses)\s*(?:[:–—-]\s*)?(?:\*\*)?\s*/gim
+  t = t.replace(sectionPattern, (_, prefix, title) => {
+    const lead = prefix === '\n' ? '\n\n' : prefix ? `${prefix}\n\n` : ''
+    return `${lead}### ${title.trim()}\n\n`
+  })
 
   // Rebuild glued tables
   t = reconstructTables(t)
 
-  // Split glued list items: "- A. - B" / "1. A. 2. B"
-  t = t.replace(/([-*+]\s.+?)\.\s([-*+]\s)/g, '$1\n$2')
-  t = t.replace(/(\d+\.\s.+?)\.\s(\d+\.\s)/g, '$1\n$2')
+  // Split glued list items: "- A. - B" / "1. A. 2. B". The first rule
+  // also repairs model output such as "rattachés.- Le score...".
+  t = t.replace(/([.!?])\s*[-•]\s+(?=[A-ZÀ-ÖØ-Þ0-9])/g, '$1\n\n- ')
+  t = t.replace(/([.!?;:])\s*(\d{1,2}\.\s+(?=[A-ZÀ-ÖØ-Þ]))/g, '$1\n$2')
+  t = t.replace(/([-*+]\s.+?)\.\s([-*+]\s)/g, '$1.\n$2')
+  t = t.replace(/(\d+\.\s.+?)\.\s(\d+\.\s)/g, '$1.\n$2')
 
   return t.replace(/\n{3,}/g, '\n\n').trim()
 }
@@ -95,16 +106,15 @@ export const AI_MD_COMPONENTS = {
     return <em className="italic text-[var(--text-muted)]">{children}</em>
   },
   ul({ children }) {
-    return <ul className="my-2.5 space-y-1.5 pl-1">{children}</ul>
+    return <ul className="my-3 space-y-2 pl-6 list-disc marker:text-brand-500">{children}</ul>
   },
   ol({ children }) {
-    return <ol className="my-2.5 space-y-1.5 pl-5 list-decimal">{children}</ol>
+    return <ol className="my-3 space-y-2 pl-6 list-decimal marker:text-brand-500 marker:font-semibold">{children}</ol>
   },
   li({ children }) {
     return (
-      <li className="flex items-start gap-2.5 text-[15px] text-[var(--text)] break-words min-w-0">
-        <span className="mt-[7px] w-1.5 h-1.5 rounded-full bg-brand-500 shrink-0" />
-        <span className="flex-1 min-w-0 break-words">{children}</span>
+      <li className="pl-1 text-[15px] leading-[1.7] text-[var(--text)] break-words min-w-0 [&>p]:inline [&>p]:mb-0">
+        {children}
       </li>
     )
   },

@@ -416,7 +416,7 @@ export default function LampadaireDetail({ lamp: initialLamp, onClose, onUpdate 
                 <div key={i} className="bg-[var(--surface-2)] rounded-lg p-3">
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-[13px] font-semibold text-brand-500">{d.recommended_intensity}%</span>
-                    <span className="text-[11px] text-[var(--text-muted)]">{(d.confidence * 100).toFixed(0)}% confiance</span>
+                    <span className="text-[11px] text-[var(--text-muted)]">indice IA indicatif {(d.confidence * 100).toFixed(0)}%</span>
                   </div>
                   <p className="text-[12px] font-medium text-[var(--text)]">{d.rule_name}</p>
                   <p className="text-[11px] text-[var(--text-muted)] mt-1">{d.reason}</p>

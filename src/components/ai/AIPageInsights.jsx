@@ -7,6 +7,8 @@ import {
 import { getPageInsights } from '../../api/ai'
 import { cn } from '../../utils/helpers'
 import { RecommendationList } from './RecommendationCard'
+import AIQualityMeta from './AIQualityMeta'
+import GroundedRecommendations from './GroundedRecommendations'
 
 const PRIORITY = {
   low:      { label: 'Faible',   bg: 'bg-slate-500/15',  text: 'text-slate-400',  border: 'border-slate-500/25' },
@@ -42,8 +44,8 @@ function Skeleton() {
   )
 }
 
-export default function AIPageInsights({ page, title = 'Analyse IA' }) {
-  const [expanded, setExpanded] = useState(true)
+export default function AIPageInsights({ page, title = 'Analyse IA', defaultExpanded = true }) {
+  const [expanded, setExpanded] = useState(defaultExpanded)
   const [refreshKey, setRefreshKey] = useState(0)
 
   const { data, isLoading, isError, error, isFetching } = useQuery({
@@ -61,6 +63,7 @@ export default function AIPageInsights({ page, title = 'Analyse IA' }) {
   // Rule-based recommendations are always present (free, 0 token). The LLM
   // narrative (summary/analysis) is optional and only generated on demand.
   const llmGenerated = data && !!data.generated_at && !!data.summary
+  const aiDisabled   = data?.ai_enabled === false
   const ruleRecs     = data?.rule_recommendations ?? []
   const hasRuleRecs  = ruleRecs.length > 0
   const showSkeleton = isLoading || (isFetching && !llmGenerated)
@@ -93,8 +96,8 @@ export default function AIPageInsights({ page, title = 'Analyse IA' }) {
 
           <button
             onClick={() => setRefreshKey((k) => k + 1)}
-            disabled={isFetching}
-            title="Générer / régénérer l'analyse IA avancée"
+            disabled={isFetching || aiDisabled}
+            title={aiDisabled ? "IA générative désactivée dans le Centre IA" : "Générer / régénérer l'analyse IA avancée"}
             className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-2)] transition-colors disabled:opacity-40"
           >
             <RefreshCw size={13} className={isFetching ? 'animate-spin' : ''} />
@@ -144,17 +147,32 @@ export default function AIPageInsights({ page, title = 'Analyse IA' }) {
                   {data.analysis && (
                     <p className="text-[13px] text-[var(--text-muted)] leading-relaxed">{data.analysis}</p>
                   )}
+                  <GroundedRecommendations recommendations={data.grounded_recommendations} />
+                  <AIQualityMeta
+                    confidence={data.confidence}
+                    confidenceBasis={data.confidence_basis}
+                    warnings={[...(data.quality_warnings ?? []), data.web?.warning].filter(Boolean)}
+                    sources={data.sources}
+                    webSources={data.web?.sources}
+                  />
                   <div className="flex items-center gap-2">
                     <Info size={10} className="text-[var(--text-muted)]" />
                     <span className="text-[10px] text-[var(--text-muted)]">
-                      Synthèse {data.cached ? '(cache) ' : ''}générée par Llama 3 · Lamalif IA
+                      Synthèse {data.cached ? '(cache) ' : ''}générée par MAADEN IA
                     </span>
                   </div>
                 </div>
               )}
 
               {/* Optional LLM enrichment CTA */}
-              {!llmGenerated && (
+              {!llmGenerated && aiDisabled && (
+                <div className="flex items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/5 p-3 text-[12px] text-amber-600 dark:text-amber-400">
+                  <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                  <span>IA générative désactivée dans le Centre IA. Les recommandations ci-dessus proviennent uniquement des règles métier.</span>
+                </div>
+              )}
+
+              {!llmGenerated && !aiDisabled && (
                 <button
                   onClick={() => setRefreshKey((k) => k + 1)}
                   disabled={isFetching}

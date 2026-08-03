@@ -3,10 +3,11 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import {
   Sparkles, RefreshCw, AlertTriangle, ChevronDown, ChevronUp,
-  ArrowRight, Zap, Radio, Wrench, Leaf, AlertCircle, Activity,
+  ArrowRight, Zap, Radio, Wrench, Leaf, AlertCircle,
 } from 'lucide-react'
 import { getDecisionCenter } from '../../api/ai'
 import { cn } from '../../utils/helpers'
+import MaadenAILogo from '../brand/MaadenAILogo'
 
 const STATUS_CFG = {
   normal:   { label: 'Normal',       dot: 'bg-emerald-400', badge: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25' },
@@ -149,11 +150,9 @@ export default function AIDashboardInsights() {
       {/* ── Header ── */}
       <div className="flex items-center justify-between px-5 py-3.5 border-b border-[var(--border)] bg-brand-500/5">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-brand-500/15 border border-brand-500/20 flex items-center justify-center shrink-0">
-            <Activity size={14} className="text-brand-500" />
-          </div>
+          <MaadenAILogo size={34} thinking={isLoading || isFetching} />
           <div>
-            <p className="text-[14px] font-bold text-[var(--text)]">Centre de décision IA</p>
+            <p className="text-[14px] font-bold text-[var(--text)]">Centre de décision MAADEN AI</p>
             {data?.generated_at && (
               <p className="text-[10px] text-[var(--text-muted)]">
                 {data.cached ? 'Cache · ' : ''}
@@ -212,7 +211,7 @@ export default function AIDashboardInsights() {
                   )}
                   {confidence !== null && (
                     <p className="text-[11px] text-[var(--text-muted)]">
-                      Confiance diagnostic : <span className="font-semibold text-[var(--text)]">{Math.round(confidence * 100)}%</span>
+                      Indice diagnostic indicatif : <span className="font-semibold text-[var(--text)]">{Math.round(confidence * 100)}%</span>
                     </p>
                   )}
                 </div>

@@ -6,16 +6,19 @@ import {
   Clock, Database, Loader2, Search, Plus,
   History, WifiOff, Wifi, PanelRightClose, PanelRightOpen,
   MessageSquarePlus, StopCircle, ThumbsUp, ThumbsDown,
+  Globe2,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import toast from 'react-hot-toast'
-import { checkAIHealth, askAI, askAIStream, getAIHistory, getAISuggestions, sendAIFeedback } from '../../api/ai'
+import { checkAIHealth, isAIHealthAvailable, askAI, askAIStream, getAIHistory, getAISuggestions, sendAIFeedback } from '../../api/ai'
 import { QK } from '../../lib/queryClient'
 import { cn } from '../../utils/helpers'
 import AIResultChart from '../../components/ai/AIResultChart'
 import AIExportActions from '../../components/ai/AIExportActions'
+import AIQualityMeta from '../../components/ai/AIQualityMeta'
 import { normalizeMarkdown } from '../../components/ai/markdown'
+import MaadenAILogo from '../../components/brand/MaadenAILogo'
 
 // ─── Suggestions ──────────────────────────────────────────────────────────────
 const QUICK_QUESTIONS = [
@@ -45,16 +48,15 @@ const MD = {
     return <em className="italic text-[var(--text-muted)]">{children}</em>
   },
   ul({ children }) {
-    return <ul className="my-2.5 space-y-1.5 pl-1">{children}</ul>
+    return <ul className="my-3 space-y-2 pl-6 list-disc marker:text-brand-500">{children}</ul>
   },
   ol({ children }) {
-    return <ol className="my-2.5 space-y-1.5 pl-5 list-decimal">{children}</ol>
+    return <ol className="my-3 space-y-2 pl-6 list-decimal marker:text-brand-500 marker:font-semibold">{children}</ol>
   },
   li({ children }) {
     return (
-      <li className="flex items-start gap-2.5 text-[15px] text-[var(--text)] break-words min-w-0">
-        <span className="mt-[7px] w-1.5 h-1.5 rounded-full bg-brand-500 shrink-0" />
-        <span className="flex-1 min-w-0 break-words">{children}</span>
+      <li className="pl-1 text-[15px] leading-[1.7] text-[var(--text)] break-words min-w-0 [&>p]:inline [&>p]:mb-0">
+        {children}
       </li>
     )
   },
@@ -282,15 +284,8 @@ function AnimatedMarkdown({ text, onDone }) {
 // ─── Thinking dots ────────────────────────────────────────────────────────────
 function ThinkingDots() {
   return (
-    <div className="flex items-center gap-1.5 py-1">
-      {[0, 1, 2].map((i) => (
-        <span
-          key={i}
-          className="w-2 h-2 rounded-full bg-[var(--text-muted)] opacity-60"
-          style={{ animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite` }}
-        />
-      ))}
-      <style>{`@keyframes bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-6px)} }`}</style>
+    <div className="inline-flex items-center py-1 text-[13px] text-[var(--text-muted)]" role="status" aria-live="polite">
+      <span>MAADEN AI réfléchit…</span>
     </div>
   )
 }
@@ -333,8 +328,8 @@ function AIMessage({ msg }) {
   return (
     <div className="flex gap-4 px-4 sm:px-8 lg:px-16 group">
       {/* Avatar */}
-      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-brand-500/20 to-blue-500/20 border border-brand-500/25 flex items-center justify-center shrink-0 mt-0.5">
-        <Sparkles size={13} className={cn('text-brand-500', isStreaming && 'animate-pulse')} />
+      <div className="w-8 h-8 flex items-center justify-center shrink-0 mt-0.5">
+        <MaadenAILogo size={30} thinking={isThinking || isStreaming} />
       </div>
 
       <div className="flex-1 min-w-0 pb-2 overflow-hidden">
@@ -353,9 +348,12 @@ function AIMessage({ msg }) {
         {chatText && (
           <>
             {isStreaming ? (
-              /* Live streaming: plain text + blinking cursor */
-              <div className="text-[15px] text-[var(--text)] leading-[1.75] whitespace-pre-wrap break-words overflow-hidden">
-                {chatText}
+              /* Live streaming: render Markdown progressively so headings and
+                 lists keep their layout before the response is complete. */
+              <div className="relative w-full min-w-0 overflow-hidden">
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD}>
+                  {normalizeMarkdown(chatText)}
+                </ReactMarkdown>
                 <span
                   className="inline-block w-0.5 h-[1em] bg-brand-400 ml-0.5 align-middle"
                   style={{ animation: 'blink 0.7s step-end infinite' }}
@@ -377,7 +375,7 @@ function AIMessage({ msg }) {
             {result.confidence && (
               <span className="flex items-center gap-1">
                 <Sparkles size={10} className="text-brand-500" />
-                {Math.round(result.confidence * 100)}% confiance
+                indice IA indicatif {Math.round(result.confidence * 100)}%
               </span>
             )}
             {result.rows?.length > 0 && (
@@ -415,6 +413,19 @@ function AIMessage({ msg }) {
               )}
               {result && <AIExportActions result={result} chartRef={chartRef} />}
             </div>
+          </div>
+        )}
+
+        {result && !isThinking && (
+          <div className="mt-2">
+            <AIQualityMeta
+              confidence={result.confidence}
+              confidenceBasis={result.confidence_basis}
+              warnings={[...(result.quality_warnings ?? []), result.web?.warning].filter(Boolean)}
+              sources={result.sources ?? result.rag?.sources}
+              webSources={result.web?.sources}
+              compact
+            />
           </div>
         )}
 
@@ -462,10 +473,10 @@ function HistoryItem({ item, onSelect }) {
 function WelcomeScreen({ suggestions, onSelect, isAIOnline }) {
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-4 py-12 text-center">
-      <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-brand-500/20 to-blue-500/20 border border-brand-500/20 flex items-center justify-center mb-5">
-        <Sparkles size={28} className="text-brand-500" />
+      <div className="mb-5">
+        <MaadenAILogo size={72} wordmark />
       </div>
-      <h2 className="text-2xl font-bold text-[var(--text)] mb-2">Lamalif IA</h2>
+      <h2 className="text-2xl font-bold text-[var(--text)] mb-2">Votre copilote réseau</h2>
       <p className="text-[15px] text-[var(--text-muted)] mb-8 max-w-sm">
         Interrogez votre réseau de télégestion en langage naturel.
       </p>
@@ -525,6 +536,7 @@ export default function AIAssistantPage() {
   const [historyOpen, setHistoryOpen]     = useState(() => localStorage.getItem('ai-history-open') !== 'false')
   const [historySearch, setHistorySearch] = useState('')
   const [sessionHistory, setSessionHistory] = useState([])
+  const [webSearchMode, setWebSearchMode] = useState(() => localStorage.getItem('ai-web-search-mode') || 'auto')
   const [isAnalyzing, setIsAnalyzing]     = useState(false)
   const [conversations, setConversations] = useState(loadConversations)
   const [activeConvId, setActiveConvId]   = useState(null)
@@ -537,6 +549,7 @@ export default function AIAssistantPage() {
   const qc                = useQueryClient()
 
   useEffect(() => { localStorage.setItem('ai-history-open', String(historyOpen)) }, [historyOpen])
+  useEffect(() => { localStorage.setItem('ai-web-search-mode', webSearchMode) }, [webSearchMode])
 
   // Auto-sauvegarde de la conversation active dès qu'elle se stabilise (façon ChatGPT).
   useEffect(() => {
@@ -599,7 +612,7 @@ export default function AIAssistantPage() {
     retry: 0,
     staleTime: 30_000,
   })
-  const isAIOnline = health?.status === 'ok'
+  const isAIOnline = isAIHealthAvailable(health)
 
   // Suggestions
   const { data: suggestData } = useQuery({
@@ -646,6 +659,7 @@ export default function AIAssistantPage() {
       language: 'fr',
       max_rows: 100,
       conversation_history: sessionHistory.slice(-6),
+      web_search_mode: webSearchMode,
     }
 
     let metaData = null
@@ -667,6 +681,10 @@ export default function AIAssistantPage() {
             recommendation: meta.recommendation,
             priority: meta.priority,
             confidence: meta.confidence,
+            quality_warnings: meta.quality_warnings,
+            confidence_basis: meta.confidence_basis,
+            sources: meta.sources,
+            web: meta.web,
             chat_response: null,
             chart: meta.chart,
             execution_time_ms: meta.execution_time_ms,
@@ -727,7 +745,7 @@ export default function AIAssistantPage() {
           })
       },
     })
-  }, [question, sessionHistory, updateMsg, refetchHistory, qc])
+  }, [question, sessionHistory, webSearchMode, updateMsg, refetchHistory, qc])
 
   const handleNewConversation = () => {
     abortRef.current?.abort()
@@ -891,10 +909,8 @@ export default function AIAssistantPage() {
                 <PanelRightOpen size={16} />
               </button>
             )}
-            <div className="w-7 h-7 rounded-lg bg-brand-500/15 flex items-center justify-center">
-              <Sparkles size={14} className="text-brand-500" />
-            </div>
-            <span className="text-sm font-semibold text-[var(--text)]">Assistant IA</span>
+            <MaadenAILogo size={29} thinking={messages.some((message) => message.isThinking || message.isStreaming)} />
+            <span className="text-sm font-semibold text-[var(--text)]">MAADEN AI</span>
           </div>
 
           <div className="flex items-center gap-3">
@@ -949,6 +965,30 @@ export default function AIAssistantPage() {
         {/* ── Bottom input ── */}
         <div className="shrink-0 border-t border-[var(--border)] bg-[var(--surface)] px-4 py-4">
           <div className="max-w-4xl mx-auto">
+            <div className="mb-2 flex items-center gap-2 text-[11px] text-[var(--text-muted)]">
+              <Globe2 size={13} />
+              <span>Web</span>
+              {[
+                ['off', 'Désactivé'],
+                ['auto', 'Auto'],
+                ['on', 'Toujours'],
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setWebSearchMode(value)}
+                  disabled={isAnalyzing}
+                  className={cn(
+                    'rounded-full border px-2.5 py-1 transition-colors',
+                    webSearchMode === value
+                      ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400'
+                      : 'border-[var(--border)] hover:text-[var(--text)]',
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             <div className={cn(
               'flex items-end gap-3 rounded-2xl border px-4 py-3 transition-colors',
               'bg-[var(--surface-2)] border-[var(--border)]',

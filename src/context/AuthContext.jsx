@@ -1,37 +1,51 @@
-import { createContext, useContext, useState, useCallback } from 'react'
+import { createContext, useContext, useState, useCallback, useEffect } from 'react'
+import { logoutApi, meApi } from '../api/auth'
+import { resetMaadenAIWelcome } from '../utils/maadenAIWelcome'
+import { resetMapStartup } from '../utils/mapStartup'
 
 const AuthContext = createContext(null)
 
-const TOKEN_KEY = 'sl_auth_token'
-const USER_KEY  = 'sl_auth_user'
-
-function loadFromStorage() {
-  try {
-    const token = localStorage.getItem(TOKEN_KEY)
-    const user  = JSON.parse(localStorage.getItem(USER_KEY) || 'null')
-    return { token, user }
-  } catch {
-    return { token: null, user: null }
-  }
-}
-
 export function AuthProvider({ children }) {
-  const [{ token, user }, setAuth] = useState(loadFromStorage)
+  const [user, setUser] = useState(null)
+  const [loading, setLoading] = useState(true)
 
-  const login = useCallback((userData, accessToken) => {
-    localStorage.setItem(TOKEN_KEY, accessToken)
-    localStorage.setItem(USER_KEY, JSON.stringify(userData))
-    setAuth({ token: accessToken, user: userData })
+  useEffect(() => {
+    let active = true
+    meApi()
+      .then((currentUser) => {
+        if (active) setUser(currentUser)
+      })
+      .catch(() => {
+        if (active) setUser(null)
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
+    }
   }, [])
 
-  const logout = useCallback(() => {
-    localStorage.removeItem(TOKEN_KEY)
-    localStorage.removeItem(USER_KEY)
-    setAuth({ token: null, user: null })
+  const login = useCallback((userData) => {
+    // A successful login starts a new welcome cycle. A simple page refresh,
+    // which uses meApi above, intentionally does not reset this value.
+    resetMaadenAIWelcome()
+    resetMapStartup()
+    setUser(userData)
+  }, [])
+
+  const logout = useCallback(async () => {
+    try {
+      await logoutApi()
+    } finally {
+      setUser(null)
+    }
   }, [])
 
   return (
-    <AuthContext.Provider value={{ user, token, login, logout, isAuthenticated: !!token }}>
+    <AuthContext.Provider
+      value={{ user, login, logout, loading, isAuthenticated: !!user }}
+    >
       {children}
     </AuthContext.Provider>
   )
@@ -39,9 +53,4 @@ export function AuthProvider({ children }) {
 
 export function useAuth() {
   return useContext(AuthContext)
-}
-
-/** Read the token without React context (for Axios interceptors). */
-export function getStoredToken() {
-  return localStorage.getItem(TOKEN_KEY)
 }

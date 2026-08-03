@@ -1,40 +1,48 @@
+import { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate, Outlet } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import Layout from './components/layout/Layout'
-import LoginPage from './pages/Login/LoginPage'
-import DashboardPage from './pages/Dashboard/DashboardPage'
-import MapPage from './pages/Map/MapPage'
-import LCUsPage from './pages/LCUs/LCUsPage'
-import LampadairesPage from './pages/Lampadaires/LampadairesPage'
-import CommissioningPage from './pages/Commissioning/CommissioningPage'
-import AlertsPage from './pages/Alerts/AlertsPage'
-import ProfilesPage from './pages/Profiles/ProfilesPage'
-import WorkOrdersPage from './pages/WorkOrders/WorkOrdersPage'
-import EnergyPage from './pages/Energy/EnergyPage'
-import SimulatorPage from './pages/Simulator/SimulatorPage'
-import AdminPage from './pages/Admin/AdminPage'
-import CabinetDetailPage from './pages/Cabinets/CabinetDetailPage'
-import BasestationDetailPage from './pages/Basestations/BasestationDetailPage'
-import ControllersPage from './pages/Controllers/ControllersPage'
-import UsersPage from './pages/Users/UsersPage'
-import AuditLogPage from './pages/AuditLog/AuditLogPage'
-import SystemHealthPage from './pages/SystemHealth/SystemHealthPage'
-import MaintenancePage from './pages/Maintenance/MaintenancePage'
-import SettingsPage from './pages/Settings/SettingsPage'
-import AIAssistantPage from './pages/AIAssistant/AIAssistantPage'
-import AICenterPage from './pages/AICenter/AICenterPage'
-import ProfilePage from './pages/Profile/ProfilePage'
-import PredictiveMaintenancePage from './pages/PredictiveMaintenance/PredictiveMaintenancePage'
+
+const LoginPage = lazy(() => import('./pages/Login/LoginPage'))
+const DashboardPage = lazy(() => import('./pages/Dashboard/DashboardPage'))
+const MapPage = lazy(() => import('./pages/Map/MapPage'))
+const LCUsPage = lazy(() => import('./pages/LCUs/LCUsPage'))
+const LampadairesPage = lazy(() => import('./pages/Lampadaires/LampadairesPage'))
+const CommissioningPage = lazy(() => import('./pages/Commissioning/CommissioningPage'))
+const AlertsPage = lazy(() => import('./pages/Alerts/AlertsPage'))
+const ProfilesPage = lazy(() => import('./pages/Profiles/ProfilesPage'))
+const WorkOrdersPage = lazy(() => import('./pages/WorkOrders/WorkOrdersPage'))
+const EnergyPage = lazy(() => import('./pages/Energy/EnergyPage'))
+const UsersPage = lazy(() => import('./pages/Users/UsersPage'))
+const AuditLogPage = lazy(() => import('./pages/AuditLog/AuditLogPage'))
+const MaintenancePage = lazy(() => import('./pages/Maintenance/MaintenancePage'))
+const SettingsPage = lazy(() => import('./pages/Settings/SettingsPage'))
+const AIAssistantPage = lazy(() => import('./pages/AIAssistant/AIAssistantPage'))
+const AICenterPage = lazy(() => import('./pages/AICenter/AICenterPage'))
+const ProfilePage = lazy(() => import('./pages/Profile/ProfilePage'))
+const PredictiveMaintenancePage = lazy(() => import('./pages/PredictiveMaintenance/PredictiveMaintenancePage'))
+
+function PageLoader() {
+  return <div className="flex min-h-48 items-center justify-center text-sm text-slate-500">Chargement…</div>
+}
 
 function RequireAuth() {
-  const { isAuthenticated } = useAuth()
+  const { isAuthenticated, loading } = useAuth()
+  if (loading) return null
   return isAuthenticated ? <Outlet /> : <Navigate to="/login" replace />
 }
 
+function RequireRole({ roles }) {
+  const { user } = useAuth()
+  return roles.includes(user?.role) ? <Outlet /> : <Navigate to="/" replace />
+}
+
 function AppRoutes() {
-  const { isAuthenticated } = useAuth()
+  const { isAuthenticated, loading } = useAuth()
+  if (loading) return null
   return (
-    <Routes>
+    <Suspense fallback={<PageLoader />}>
+      <Routes>
       <Route
         path="/login"
         element={isAuthenticated ? <Navigate to="/" replace /> : <LoginPage />}
@@ -50,16 +58,12 @@ function AppRoutes() {
           <Route path="/profiles" element={<ProfilesPage />} />
           <Route path="/workorders" element={<WorkOrdersPage />} />
           <Route path="/energy" element={<EnergyPage />} />
-          <Route path="/simulator" element={<SimulatorPage />} />
-          <Route path="/admin" element={<AdminPage />} />
-          <Route path="/cabinets/:id" element={<CabinetDetailPage />} />
-          <Route path="/basestations/:id" element={<BasestationDetailPage />} />
-          <Route path="/controllers" element={<ControllersPage />} />
-          <Route path="/users" element={<UsersPage />} />
-          <Route path="/audit-log" element={<AuditLogPage />} />
-          <Route path="/system-health" element={<SystemHealthPage />} />
+          <Route element={<RequireRole roles={['admin']} />}>
+            <Route path="/users" element={<UsersPage />} />
+            <Route path="/audit-log" element={<AuditLogPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+          </Route>
           <Route path="/maintenance" element={<MaintenancePage />} />
-          <Route path="/settings" element={<SettingsPage />} />
           <Route path="/ai-assistant" element={<AIAssistantPage />} />
           <Route path="/ai-center" element={<AICenterPage />} />
           <Route path="/profile" element={<ProfilePage />} />
@@ -67,7 +71,8 @@ function AppRoutes() {
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+      </Routes>
+    </Suspense>
   )
 }
 

@@ -1,5 +1,4 @@
 import axios from 'axios'
-import { getStoredToken } from '../context/AuthContext'
 
 // Separate client with 60s timeout for AI calls (LLM inference can be slow)
 // Also handles FastAPI's `detail` error field which the global client doesn't
@@ -7,12 +6,7 @@ const aiClient = axios.create({
   baseURL: '/api',
   headers: { 'Content-Type': 'application/json' },
   timeout: 60000,
-})
-
-aiClient.interceptors.request.use((config) => {
-  const token = getStoredToken()
-  if (token) config.headers.Authorization = `Bearer ${token}`
-  return config
+  withCredentials: true,
 })
 
 aiClient.interceptors.response.use(
@@ -32,12 +26,18 @@ aiClient.interceptors.response.use(
 export const checkAIHealth = () =>
   aiClient.get('/ai/health', { timeout: 5000 })
 
+// /health historically returned "ok". The hardened readiness endpoint returns
+// "ready" or "degraded" (RAG optional) while still being able to serve AI queries.
+export const isAIHealthAvailable = (health) =>
+  ['ok', 'ready', 'degraded'].includes(health?.status)
+
 export const askAI = (payload) =>
   aiClient.post('/ai/query', {
     question: payload.question,
     language: payload.language ?? 'fr',
     max_rows: payload.max_rows ?? 100,
     conversation_history: payload.conversation_history ?? null,
+    web_search_mode: payload.web_search_mode ?? 'auto',
   }, { timeout: 120000 }) // gros modèle : marge au-delà des 60 s par défaut
 
 export const getAISuggestions = () =>
@@ -55,12 +55,11 @@ export function askAIStream(payload, { onMeta, onToken, onDone, onError }) {
   const controller = new AbortController()
   const run = async () => {
     try {
-      const token = getStoredToken()
       const res = await fetch('/api/ai/query/stream', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: {
           'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         signal: controller.signal,
         body: JSON.stringify({
@@ -68,6 +67,7 @@ export function askAIStream(payload, { onMeta, onToken, onDone, onError }) {
           language: payload.language ?? 'fr',
           max_rows: payload.max_rows ?? 100,
           conversation_history: payload.conversation_history ?? null,
+          web_search_mode: payload.web_search_mode ?? 'auto',
         }),
       })
       if (!res.ok) {
@@ -93,7 +93,8 @@ export function askAIStream(payload, { onMeta, onToken, onDone, onError }) {
               const parsed = JSON.parse(payload)
               if (parsed.type === 'meta') { onMeta?.(parsed); continue }
               if (parsed.type === 'error') { onError?.(parsed.message); return }
-            } catch (_) { /* not JSON — treat as token */ }
+              if (parsed.type === 'token') { onToken?.(parsed.content || ''); continue }
+            } catch { /* not JSON — treat as token */ }
           }
           onToken?.(payload)
         }
@@ -113,8 +114,8 @@ export const getDailyDigest = (refresh = false) =>
     timeout: 60000,
   })
 
-export const getAIHistory = (limit = 20, search = '') =>
-  aiClient.get('/ai/history', { params: { limit, search } })
+export const getAIHistory = (limit = 20, search = '', scope = 'mine') =>
+  aiClient.get('/ai/history', { params: { limit, search, scope } })
 
 // Feedback 👍/👎 sur une réponse IA (rating: 1 = utile, -1 = pas utile)
 export const sendAIFeedback = ({ rating, question, answer }) =>
@@ -134,6 +135,12 @@ export const getEntityInsights = (entityType, entityId, refresh = false) =>
   aiClient.get(`/ai/entity-insights/${entityType}/${entityId}`, {
     params: refresh ? { refresh: 'true' } : {},
     timeout: 60000,
+  })
+
+export const getPredictiveExplanation = (prediction, refresh = true) =>
+  aiClient.post('/ai/predictive-maintenance/explanation', prediction, {
+    params: { refresh: String(refresh) },
+    timeout: 90000,
   })
 
 export const getDecisionCenter = (refresh = false) =>

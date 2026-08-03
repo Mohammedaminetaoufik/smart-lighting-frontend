@@ -7,7 +7,7 @@ import RiskLevelBadge from './RiskLevelBadge'
 import TelemetryFreshnessBadge from './TelemetryFreshnessBadge'
 import PredictionConfidence from './PredictionConfidence'
 import { sortPredictions } from '../../services/predictiveMaintenanceService'
-import { PredictiveEmptyState, PredictiveSkeleton } from './PredictiveStates'
+import { PredictiveEmptyState, PredictiveErrorState, PredictiveSkeleton } from './PredictiveStates'
 
 const PAGE_SIZE = 10
 
@@ -46,7 +46,7 @@ function RowActionMenu({ item, onAction }) {
               onClick={(e) => { e.stopPropagation(); setOpen(false); onAction(a.key, item) }}
               className="w-full flex items-center gap-2.5 px-3 py-2 text-[12.5px] text-[var(--text)] hover:bg-[var(--surface-2)] transition-colors">
               <a.icon size={13} className="text-[var(--text-muted)]" />
-              {a.label}
+              {a.key === 'workorder' && item.work_order_id ? 'Voir le bon de travail' : a.label}
             </button>
           ))}
         </div>
@@ -74,18 +74,18 @@ export default function PriorityLampTable({ items, loading, error, onRowClick, o
 
   const sorted = useMemo(() => sortPredictions(items, sortKey, sortDir), [items, sortKey, sortDir])
   const pageCount = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE))
-  const current = useMemo(() => sorted.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE), [sorted, page])
-
-  useEffect(() => { if (page > pageCount - 1) setPage(0) }, [pageCount, page])
+  const currentPage = Math.min(page, pageCount - 1)
+  const current = useMemo(() => sorted.slice(currentPage * PAGE_SIZE, currentPage * PAGE_SIZE + PAGE_SIZE), [sorted, currentPage])
 
   const toggleSort = (key) => {
+    setPage(0)
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
     else { setSortKey(key); setSortDir('desc') }
   }
 
   const allOnPageSelected = current.length > 0 && current.every((i) => selected?.has(i.id))
 
-  if (loading) return <PredictiveSkeleton rows={6} />
+  if (loading) return <PredictiveSkeleton rows={6} tableOnly />
 
   return (
     <div className="rounded-2xl bg-[var(--surface)] border border-[var(--border)] overflow-hidden">
@@ -100,7 +100,7 @@ export default function PriorityLampTable({ items, loading, error, onRowClick, o
       </div>
 
       {error ? (
-        <div className="py-10 text-center text-[12px] text-red-500">Erreur de chargement du tableau.</div>
+        <PredictiveErrorState message="Erreur de chargement du tableau." />
       ) : sorted.length === 0 ? (
         <PredictiveEmptyState />
       ) : (
@@ -121,7 +121,7 @@ export default function PriorityLampTable({ items, loading, error, onRowClick, o
                   <th className="text-right font-medium px-3 py-2.5"><SortHeader label="Score" active={sortKey === 'risk_score'} dir={sortDir} onClick={() => toggleSort('risk_score')} align="right" /></th>
                   <th className="text-left font-medium px-3 py-2.5">Panne probable</th>
                   <th className="text-left font-medium px-3 py-2.5"><SortHeader label="Échéance" active={sortKey === 'eta_hours'} dir={sortDir} onClick={() => toggleSort('eta_hours')} /></th>
-                  <th className="text-left font-medium px-3 py-2.5">Confiance</th>
+                  <th className="text-left font-medium px-3 py-2.5">Fiabilité score</th>
                   <th className="text-left font-medium px-3 py-2.5"><SortHeader label="Télémétrie" active={sortKey === 'freshness'} dir={sortDir} onClick={() => toggleSort('freshness')} /></th>
                   <th className="w-10 px-3 py-2.5" />
                 </tr>
@@ -130,7 +130,15 @@ export default function PriorityLampTable({ items, loading, error, onRowClick, o
                 {current.map((p) => (
                   <tr key={p.id}
                     onClick={() => onRowClick(p)}
-                    className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--surface-2)] cursor-pointer transition-colors">
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        onRowClick(p)
+                      }
+                    }}
+                    tabIndex={0}
+                    aria-label={`Ouvrir le diagnostic de ${p.reference}`}
+                    className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--surface-2)] cursor-pointer transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--brand)]">
                     <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" checked={selected?.has(p.id) || false} onChange={() => onToggleSelect(p.id)}
                         aria-label={`Sélectionner ${p.reference}`} className="accent-[var(--brand)]" />
@@ -160,14 +168,14 @@ export default function PriorityLampTable({ items, loading, error, onRowClick, o
 
           {pageCount > 1 && (
             <div className="flex items-center justify-between px-5 py-3 border-t border-[var(--border)]">
-              <span className="text-[11px] text-[var(--text-muted)]">Page {page + 1} / {pageCount}</span>
+              <span className="text-[11px] text-[var(--text-muted)]">Page {currentPage + 1} / {pageCount}</span>
               <div className="flex items-center gap-1">
-                <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0}
+                <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={currentPage === 0}
                   aria-label="Page précédente"
                   className="p-1.5 rounded-lg hover:bg-[var(--surface-2)] text-[var(--text-muted)] disabled:opacity-40 disabled:cursor-not-allowed">
                   <ChevronLeft size={15} />
                 </button>
-                <button onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))} disabled={page >= pageCount - 1}
+                <button onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))} disabled={currentPage >= pageCount - 1}
                   aria-label="Page suivante"
                   className="p-1.5 rounded-lg hover:bg-[var(--surface-2)] text-[var(--text-muted)] disabled:opacity-40 disabled:cursor-not-allowed">
                   <ChevronRight size={15} />

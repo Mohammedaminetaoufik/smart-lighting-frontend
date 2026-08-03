@@ -121,7 +121,7 @@ function ActionCard({ rec, onCreateWO }) {
               />
             </div>
             <span className="text-[10px] text-[var(--text-muted)] shrink-0">
-              {Math.round(rec.confidence * 100)}% confiance
+              indice IA {Math.round(rec.confidence * 100)}%
             </span>
           </div>
         )}
@@ -463,7 +463,7 @@ export default function AICenterPage() {
               {data.confidence && (
                 <div className="text-right">
                   <p className="text-[20px] font-bold text-[var(--text)]">{Math.round(data.confidence * 100)}%</p>
-                  <p className="text-[11px] text-[var(--text-muted)]">Confiance diagnostic</p>
+                  <p className="text-[11px] text-[var(--text-muted)]">Indice diagnostic indicatif</p>
                 </div>
               )}
             </div>

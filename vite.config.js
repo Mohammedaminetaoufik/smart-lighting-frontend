@@ -11,6 +11,11 @@ export default defineConfig({
   optimizeDeps: {
     include: ['react', 'react-dom', 'framer-motion'],
   },
+  test: {
+    environment: 'jsdom',
+    setupFiles: './src/test/setup.js',
+    css: false,
+  },
   server: {
     port: 5173,
     strictPort: true,  // fail fast if 5173 is taken instead of silently moving to 5174/5175

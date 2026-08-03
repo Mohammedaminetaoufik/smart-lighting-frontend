@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Cpu, ShieldCheck, Database, Zap } from 'lucide-react'
 
 const STEPS = [
-  { icon: Cpu,         text: 'Génération de la requête SQL avec Llama 3…',         color: 'text-blue-400',  bg: 'bg-blue-500/10',  border: 'border-blue-500/20'  },
+  { icon: Cpu,         text: 'Génération de la requête SQL avec le moteur IA…',   color: 'text-blue-400',  bg: 'bg-blue-500/10',  border: 'border-blue-500/20'  },
   { icon: ShieldCheck, text: 'Validation sécurisée avec SQLGuard…',                color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/20' },
   { icon: Database,    text: 'Lecture des données PostgreSQL…',                    color: 'text-purple-400',bg: 'bg-purple-500/10',border: 'border-purple-500/20'},
   { icon: Zap,         text: 'Préparation du résumé et des recommandations…',     color: 'text-brand-400', bg: 'bg-brand-500/10', border: 'border-brand-500/20' },

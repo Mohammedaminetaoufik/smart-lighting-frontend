@@ -33,7 +33,7 @@ export async function generateEnergyAuditPdf({
   doc.setFontSize(18); doc.setFont('helvetica', 'bold')
   doc.text('Rapport d\'audit énergétique', 40, 40)
   doc.setFontSize(10); doc.setFont('helvetica', 'normal')
-  doc.text(`Lamalif Télégestion · Période : ${period} · Généré le ${now}`, 40, 58)
+  doc.text(`MAADEN Smart Controlling · Période : ${period} · Généré le ${now}`, 40, 58)
   y = 104
 
   // ── Synthèse chiffrée ──

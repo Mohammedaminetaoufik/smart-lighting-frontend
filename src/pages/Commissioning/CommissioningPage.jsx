@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   CheckSquare, ChevronRight, Play, CheckCheck,
   RefreshCw, AlertTriangle, Filter, Radio,
-  MapPin, Layers, X, ChevronDown,
+  MapPin, Layers, X, ChevronDown, Search,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { getLampadaires } from '../../api/lampadaires'
 import { getLCUs } from '../../api/lcus'
 import {
   batchTestCommissioning, validateSuccessful, retryFailed,
-  failCommissioning,
 } from '../../api/admin'
 import Card, { CardHeader } from '../../components/ui/Card'
 import Badge from '../../components/ui/Badge'
@@ -20,16 +20,6 @@ import AIPageInsights from '../../components/ai/AIPageInsights'
 import { commissioningColor, labelCommissioning, cn } from '../../utils/helpers'
 
 const STEPS = ['discovered', 'located', 'configured', 'tested', 'commissioned']
-const STEP_IDX = Object.fromEntries(STEPS.map((s, i) => [s, i]))
-
-/* status dot colour */
-const reasonColor = (status) => {
-  if (status === 'tested')       return 'text-green-500 bg-green-500/10 border-green-500/20'
-  if (status === 'failed')       return 'text-red-400 bg-red-500/10 border-red-500/20'
-  if (status === 'commissioned') return 'text-brand-500 bg-brand-500/10 border-brand-500/20'
-  if (status === 'configured')   return 'text-amber-400 bg-amber-500/10 border-amber-500/20'
-  return 'text-[var(--text-muted)] bg-[var(--surface-2)] border-[var(--border)]'
-}
 
 /* ── Batch result summary card ── */
 function SummaryCard({ summary, onDismiss }) {
@@ -64,18 +54,22 @@ function SummaryCard({ summary, onDismiss }) {
 }
 
 export default function CommissioningPage() {
+  const navigate = useNavigate()
   const [lamps,      setLamps]      = useState([])
   const [lcus,       setLCUs]       = useState([])
   const [loading,    setLoading]    = useState(true)
   const [batchBusy,  setBatchBusy]  = useState(null)   // which batch action is running
   const [summary,    setSummary]    = useState(null)    // last batch result
   const [selected,   setSelected]   = useState(new Set()) // selected lamp IDs
-  const [filterMode, setFilterMode] = useState('pending') // 'pending' | 'failed' | 'all'
+  const [filterMode, setFilterMode] = useState('pending') // pending | failed | commissioned | all
+  const [filterStage, setFilterStage] = useState('')
   const [filterLCU,  setFilterLCU]  = useState('')
   const [filterZone, setFilterZone] = useState('')
+  const [search,     setSearch]     = useState('')
   const [lcuPickerOpen,  setLcuPickerOpen]  = useState(false)
   const [zonePicker, setZonePicker] = useState(false)
   const firstLoad = useRef(true)
+  const listRef = useRef(null)
 
   const load = () => {
     if (firstLoad.current) setLoading(true)
@@ -91,20 +85,93 @@ export default function CommissioningPage() {
 
   /* ── derived data ── */
   const commissioned = lamps.filter((l) => l.commissioning_status === 'commissioned')
-  const pending      = lamps.filter((l) => l.commissioning_status !== 'commissioned')
+  const awaiting     = lamps.filter((l) => !['commissioned', 'failed'].includes(l.commissioning_status))
+  const remaining    = lamps.filter((l) => l.commissioning_status !== 'commissioned')
   const failed       = lamps.filter((l) => l.commissioning_status === 'failed')
   const tested       = lamps.filter((l) => l.commissioning_status === 'tested')
   const progress     = lamps.length > 0 ? (commissioned.length / lamps.length) * 100 : 0
+  const progressLabel = Math.round(progress)
   const zones        = [...new Set(lamps.map((l) => l.zone).filter(Boolean))].sort()
+  const countsByStage = Object.fromEntries(
+    [...STEPS, 'failed'].map((status) => [status, lamps.filter((l) => l.commissioning_status === status).length])
+  )
+
+  const priority = lamps.length === 0
+    ? {
+        tone: 'blue',
+        title: 'Aucun lampadaire à mettre en service',
+        description: 'Ajoutez ou synchronisez des équipements pour démarrer le parcours de mise en service.',
+        action: 'none',
+      }
+    : tested.length > 0
+      ? {
+        tone: 'green', status: 'tested',
+        title: `${tested.length} lampadaire${tested.length > 1 ? 's sont' : ' est'} prêt${tested.length > 1 ? 's' : ''} à être mis en service`,
+        description: 'Les tests de communication et de dimming ont réussi. Validez-les pour terminer leur mise en service.',
+        action: 'validate', actionLabel: `Valider ${tested.length} réussite${tested.length > 1 ? 's' : ''}`,
+      }
+      : failed.length > 0
+        ? {
+          tone: 'red', status: 'failed',
+          title: `${failed.length} échec${failed.length > 1 ? 's nécessitent' : ' nécessite'} une intervention`,
+          description: 'Consultez la cause, corrigez le problème terrain puis relancez l’évaluation.',
+          action: 'stage', actionLabel: 'Afficher les échecs',
+        }
+        : countsByStage.located > 0
+          ? {
+            tone: 'amber', status: 'located',
+            title: `${countsByStage.located} lampadaire${countsByStage.located > 1 ? 's sont' : ' est'} bloqué${countsByStage.located > 1 ? 's' : ''} après la localisation`,
+            description: 'Les données du contrôleur sont manquantes. Vérifiez puis synchronisez les passerelles LCU concernées.',
+            action: 'stage', actionLabel: `Afficher les ${countsByStage.located} lampadaires`, showLCUs: true,
+          }
+          : countsByStage.discovered > 0
+            ? {
+              tone: 'amber', status: 'discovered',
+              title: `${countsByStage.discovered} lampadaire${countsByStage.discovered > 1 ? 's attendent' : ' attend'} sa localisation`,
+              description: 'Confirmez leur position GPS et leur association à une LCU avant de poursuivre.',
+              action: 'stage', actionLabel: 'Afficher les lampadaires',
+            }
+            : countsByStage.configured > 0
+              ? {
+                tone: 'blue', status: 'configured',
+                title: `${countsByStage.configured} lampadaire${countsByStage.configured > 1 ? 's doivent' : ' doit'} être testé${countsByStage.configured > 1 ? 's' : ''}`,
+                description: 'Lancez leur évaluation pour contrôler la communication et le dimming.',
+                action: 'stage', actionLabel: 'Afficher les lampadaires',
+              }
+              : {
+                tone: 'green', status: 'commissioned',
+                title: 'La mise en service est terminée',
+                description: 'Tous les lampadaires ont franchi les étapes de configuration et de validation.',
+                action: 'stage', actionLabel: 'Afficher les lampadaires en service',
+              }
 
   /* filtered list for the table */
   const visible = lamps.filter((l) => {
-    if (filterMode === 'pending' && l.commissioning_status === 'commissioned') return false
+    if (filterMode === 'pending' && ['commissioned', 'failed'].includes(l.commissioning_status)) return false
     if (filterMode === 'failed'  && l.commissioning_status !== 'failed')       return false
+    if (filterMode === 'commissioned' && l.commissioning_status !== 'commissioned') return false
+    if (filterStage && l.commissioning_status !== filterStage) return false
     if (filterLCU  && String(l.lcu_id) !== filterLCU)  return false
     if (filterZone && l.zone !== filterZone)            return false
+    if (search.trim()) {
+      const lcu = lcus.find((item) => item.id === l.lcu_id)
+      const haystack = [l.reference, l.zone, lcu?.reference, l.controller_type, l.commissioning_notes]
+        .filter(Boolean).join(' ').toLowerCase()
+      if (!haystack.includes(search.trim().toLowerCase())) return false
+    }
     return true
   })
+
+  const showStage = (status) => {
+    setFilterStage(status)
+    setFilterMode(status === 'failed' ? 'failed' : status === 'commissioned' ? 'commissioned' : 'pending')
+    requestAnimationFrame(() => listRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }))
+  }
+
+  const changeMode = (mode) => {
+    setFilterMode(mode)
+    setFilterStage('')
+  }
 
   /* ── selection helpers ── */
   const toggleSelect = (id) => setSelected((s) => {
@@ -120,7 +187,7 @@ export default function CommissioningPage() {
     setSummary(null)
     try {
       const body = { scope, ...extra }
-      if (scope === 'selected') body.ids = [...selected]
+      if (scope === 'selected' && !body.ids) body.ids = [...selected]
       const res = await batchTestCommissioning(body)
       const data = res?.data ?? res
       setSummary(data)
@@ -162,60 +229,148 @@ export default function CommissioningPage() {
     }
   }
 
-  const runFail = async (id) => {
-    try {
-      await failCommissioning(id)
-      toast.success('Marqué en échec')
-      load()
-    } catch (e) {
-      toast.error(e.message)
-    }
-  }
-
   if (loading) return <PageLoader />
 
   return (
     <div className="space-y-5">
 
-      {/* ── Progress overview ── */}
-      <Card>
+      {/* ── Progress overview: the five commissioning stages form one flow ── */}
+      <Card className="overflow-hidden">
         <CardHeader
-          title="Mise en service"
-          subtitle={`${commissioned.length} / ${lamps.length} lampadaires commissionnés`}
+          title="Progression globale"
+          subtitle={`${commissioned.length} sur ${lamps.length} lampadaires mis en service · ${remaining.length} restant${remaining.length > 1 ? 's' : ''}`}
+          action={(
+            <div className="text-right">
+              <p className="text-2xl font-bold tabular-nums text-[var(--text)]">{progressLabel}%</p>
+              <p className="text-[10px] text-[var(--text-muted)]">terminé</p>
+            </div>
+          )}
         />
-        <div className="w-full h-2.5 bg-[var(--surface-2)] rounded-full overflow-hidden mb-4">
+        <div className="w-full h-2 bg-[var(--surface-2)] rounded-full overflow-hidden mb-5" role="progressbar"
+          aria-label="Progression de la mise en service" aria-valuemin="0" aria-valuemax="100" aria-valuenow={progressLabel}>
           <div className="h-full bg-brand-500 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
         </div>
-        <div className="grid grid-cols-6 gap-2">
-          {[...STEPS, 'failed'].map((s) => {
-            const count = lamps.filter((l) => l.commissioning_status === s).length
-            const col = commissioningColor(s)
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
+          {STEPS.map((status, index) => {
+            const count = countsByStage[status]
+            const col = commissioningColor(status)
+            const active = filterStage === status
             return (
-              <div key={s}
-                className="text-center bg-[var(--surface-2)] rounded-xl p-2.5 border border-[var(--border)] cursor-pointer hover:border-brand-500/30 transition-colors"
-                onClick={() => setFilterMode(s === 'commissioned' ? 'all' : s === 'failed' ? 'failed' : 'pending')}>
-                <p className={cn('text-[10px] font-semibold px-1.5 py-0.5 rounded-full inline-block', col.bg, col.text)}>
-                  {labelCommissioning(s)}
-                </p>
-                <p className="font-bold text-[20px] text-[var(--text)] mt-1">{count}</p>
-              </div>
+              <button key={status} type="button" onClick={() => showStage(status)} aria-pressed={active}
+                className={cn(
+                  'relative flex items-center gap-3 rounded-xl border p-3 text-left transition-all',
+                  active
+                    ? 'border-brand-500/60 bg-brand-500/10 ring-1 ring-brand-500/20'
+                    : 'border-[var(--border)] bg-[var(--surface-2)] hover:border-brand-500/35 hover:bg-brand-500/5'
+                )}>
+                <span className={cn(
+                  'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold',
+                  count > 0 || status === 'commissioned' ? `${col.bg} ${col.text}` : 'bg-[var(--surface)] text-[var(--text-muted)]'
+                )}>
+                  {index + 1}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[11px] font-semibold text-[var(--text)]">{labelCommissioning(status)}</span>
+                  <span className="mt-0.5 block text-[10px] text-[var(--text-muted)]">{count} à cette étape</span>
+                </span>
+                <span className="text-xl font-bold tabular-nums text-[var(--text)]">{count}</span>
+                {index < STEPS.length - 1 && (
+                  <ChevronRight size={15} className="absolute -right-3 z-10 hidden text-[var(--text-muted)] lg:block" />
+                )}
+              </button>
             )
           })}
         </div>
+
+        <button type="button" onClick={() => showStage('failed')}
+          className={cn(
+            'mt-3 flex w-full items-center justify-between rounded-xl border px-3.5 py-2.5 text-left transition-colors',
+            failed.length > 0
+              ? 'border-red-500/25 bg-red-500/5 hover:bg-red-500/10'
+              : 'border-[var(--border)] bg-[var(--surface-2)] hover:border-brand-500/30'
+          )}>
+          <span className="flex items-center gap-2 text-[11px] font-medium text-[var(--text-muted)]">
+            <AlertTriangle size={13} className={failed.length > 0 ? 'text-red-400' : ''} />
+            Échecs hors parcours
+          </span>
+          <span className={cn('text-sm font-bold tabular-nums', failed.length > 0 ? 'text-red-400' : 'text-[var(--text)]')}>
+            {failed.length}
+          </span>
+        </button>
       </Card>
+
+      {/* ── The single most useful next action ── */}
+      <div className={cn(
+        'flex flex-col gap-4 rounded-2xl border p-5 sm:flex-row sm:items-center',
+        priority.tone === 'red' && 'border-red-500/25 bg-red-500/[0.06]',
+        priority.tone === 'amber' && 'border-amber-500/25 bg-amber-500/[0.06]',
+        priority.tone === 'green' && 'border-green-500/25 bg-green-500/[0.06]',
+        priority.tone === 'blue' && 'border-blue-500/25 bg-blue-500/[0.06]',
+      )}>
+        <div className={cn(
+          'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border',
+          priority.tone === 'red' && 'border-red-500/25 bg-red-500/10 text-red-400',
+          priority.tone === 'amber' && 'border-amber-500/25 bg-amber-500/10 text-amber-500',
+          priority.tone === 'green' && 'border-green-500/25 bg-green-500/10 text-green-500',
+          priority.tone === 'blue' && 'border-blue-500/25 bg-blue-500/10 text-blue-500',
+        )}>
+          {priority.tone === 'green' ? <CheckCheck size={19} /> : <AlertTriangle size={19} />}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)]">Priorité actuelle</p>
+          <h2 className="mt-1 text-[15px] font-semibold text-[var(--text)]">{priority.title}</h2>
+          <p className="mt-1 text-[12px] leading-relaxed text-[var(--text-muted)]">{priority.description}</p>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          {priority.showLCUs && (
+            <Button size="sm" variant="secondary" onClick={() => navigate('/lcus')}>
+              <Radio size={12} /> Ouvrir les LCU
+            </Button>
+          )}
+          {priority.action !== 'none' && (
+            <Button size="sm"
+              loading={priority.action === 'validate' && batchBusy === 'validate'}
+              disabled={!!batchBusy}
+              onClick={() => priority.action === 'validate' ? runValidate() : showStage(priority.status)}>
+              {priority.actionLabel} <ChevronRight size={12} />
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* AI help is now visible before the long list, collapsed by default. */}
+      <AIPageInsights page="commissioning" title="Analyse IA de la mise en service" defaultExpanded={false} />
 
       {/* ── Batch action toolbar ── */}
       <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
-        <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-3">
-          Actions batch
-        </p>
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
+              Actions de mise en service
+            </p>
+            <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+              Réévaluez les prérequis techniques pour tous les lampadaires ou un périmètre précis.
+            </p>
+          </div>
+          {selected.size > 0 && (
+            <span className="rounded-full bg-brand-500/10 px-2.5 py-1 text-[11px] font-semibold text-brand-500">
+              {selected.size} sélectionné{selected.size > 1 ? 's' : ''}
+            </span>
+          )}
+        </div>
         <div className="flex flex-wrap gap-2">
 
           {/* Tester tous */}
-          <Button size="sm" loading={batchBusy === 'all'} onClick={() => runBatch('all')}
-            disabled={!!batchBusy}>
-            <Play size={12} /> Tester tous ({pending.length})
-          </Button>
+          {remaining.length > 0 ? (
+            <Button size="sm" loading={batchBusy === 'all'} onClick={() => runBatch('all')}
+              disabled={!!batchBusy}>
+              <Play size={12} /> Évaluer les non commissionnés ({remaining.length})
+            </Button>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 rounded-lg bg-green-500/10 px-3 py-1.5 text-xs font-medium text-green-500">
+              <CheckCheck size={12} /> Aucune action requise
+            </span>
+          )}
 
           {/* Tester par LCU — dropdown */}
           <div className="relative">
@@ -270,98 +425,131 @@ export default function CommissioningPage() {
             </Button>
           )}
 
-          {/* Separator */}
-          <div className="w-px bg-[var(--border)] mx-1 self-stretch" />
-
           {/* Valider les réussis */}
-          <Button size="sm" variant="secondary" loading={batchBusy === 'validate'}
-            onClick={runValidate} disabled={!!batchBusy || tested.length === 0}
-            className={tested.length > 0 ? 'border-green-500/40 text-green-500 hover:bg-green-500/10' : ''}>
-            <CheckCheck size={12} /> Valider les réussis ({tested.length})
-          </Button>
+          {tested.length > 0 && (
+            <Button size="sm" variant="secondary" loading={batchBusy === 'validate'}
+              onClick={runValidate} disabled={!!batchBusy}
+              className="border-green-500/40 text-green-500 hover:bg-green-500/10">
+              <CheckCheck size={12} /> Valider les réussis ({tested.length})
+            </Button>
+          )}
 
           {/* Relancer les échecs */}
-          <Button size="sm" variant="secondary" loading={batchBusy === 'retry'}
-            onClick={runRetry} disabled={!!batchBusy || failed.length === 0}
-            className={failed.length > 0 ? 'border-amber-500/40 text-amber-400 hover:bg-amber-500/10' : ''}>
-            <RefreshCw size={12} /> Relancer les échecs ({failed.length})
-          </Button>
+          {failed.length > 0 && (
+            <Button size="sm" variant="secondary" loading={batchBusy === 'retry'}
+              onClick={runRetry} disabled={!!batchBusy}
+              className="border-amber-500/40 text-amber-500 hover:bg-amber-500/10">
+              <RefreshCw size={12} /> Relancer les échecs ({failed.length})
+            </Button>
+          )}
+        </div>
+      </div>
 
-          {/* Filter toggle */}
-          <div className="ml-auto flex gap-1">
+      {/* ── Batch test result stays attached to the action that produced it ── */}
+      <SummaryCard summary={summary} onDismiss={() => setSummary(null)} />
+
+      {/* ── List views and filters are separate from operational actions ── */}
+      <div ref={listRef} className="scroll-mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+        <div className="flex flex-col gap-3 border-b border-[var(--border)] pb-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="text-[14px] font-semibold text-[var(--text)]">Lampadaires</h2>
+            <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">Filtrez la liste par état ou par étape du parcours.</p>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
             {[
-              { key: 'pending', label: 'En attente' },
-              { key: 'failed',  label: 'Échecs' },
-              { key: 'all',     label: 'Tous' },
-            ].map((f) => (
-              <button key={f.key} onClick={() => setFilterMode(f.key)}
+              { key: 'pending', label: 'En attente', count: awaiting.length },
+              { key: 'failed', label: 'Échecs', count: failed.length },
+              { key: 'commissioned', label: 'En service', count: commissioned.length },
+              { key: 'all', label: 'Tous', count: lamps.length },
+            ].map((item) => (
+              <button key={item.key} type="button" onClick={() => changeMode(item.key)}
                 className={cn(
-                  'px-3 py-1.5 rounded-xl text-[11px] font-medium border transition-colors',
-                  filterMode === f.key
-                    ? 'bg-brand-500/15 border-brand-500/40 text-brand-500'
+                  'rounded-lg border px-3 py-1.5 text-[11px] font-medium transition-colors',
+                  filterMode === item.key && !filterStage
+                    ? 'border-brand-500/40 bg-brand-500/15 text-brand-500'
                     : 'border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]'
                 )}>
-                {f.label}
+                {item.label} <span className="ml-1 tabular-nums opacity-70">{item.count}</span>
               </button>
             ))}
           </div>
         </div>
 
-        {/* Sub-filters: LCU + Zone */}
-        <div className="flex gap-3 mt-3 pt-3 border-t border-[var(--border)]">
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] text-[var(--text-muted)]">LCU :</span>
+        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-[minmax(240px,1fr)_180px_180px_180px_auto]">
+          <label className="relative block">
+            <Search size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)}
+              placeholder="Rechercher une référence, une LCU, une zone…"
+              className="h-9 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] pl-8 pr-3 text-[12px] text-[var(--text)] placeholder:text-[var(--text-muted)] focus:border-brand-500/50 focus:outline-none focus:ring-1 focus:ring-brand-500/20" />
+          </label>
+
+          <label className="relative">
+            <Filter size={12} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+            <select value={filterStage} onChange={(e) => e.target.value ? showStage(e.target.value) : setFilterStage('')}
+              className="h-9 w-full appearance-none rounded-lg border border-[var(--border)] bg-[var(--surface-2)] pl-8 pr-8 text-[12px] text-[var(--text)] focus:border-brand-500/50 focus:outline-none">
+              <option value="">Toutes les étapes</option>
+              {STEPS.map((status) => <option key={status} value={status}>{labelCommissioning(status)}</option>)}
+              <option value="failed">Échec</option>
+            </select>
+            <ChevronDown size={12} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+          </label>
+
+          <label className="relative">
+            <Radio size={12} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
             <select value={filterLCU} onChange={(e) => setFilterLCU(e.target.value)}
-              className="px-2.5 py-1 text-[12px] bg-[var(--surface-2)] border border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:ring-1 focus:ring-brand-500/30">
-              <option value="">Toutes</option>
+              className="h-9 w-full appearance-none rounded-lg border border-[var(--border)] bg-[var(--surface-2)] pl-8 pr-8 text-[12px] text-[var(--text)] focus:border-brand-500/50 focus:outline-none">
+              <option value="">Toutes les LCU</option>
               {lcus.map((l) => <option key={l.id} value={String(l.id)}>{l.reference}</option>)}
             </select>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] text-[var(--text-muted)]">Zone :</span>
+            <ChevronDown size={12} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+          </label>
+
+          <label className="relative">
+            <MapPin size={12} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
             <select value={filterZone} onChange={(e) => setFilterZone(e.target.value)}
-              className="px-2.5 py-1 text-[12px] bg-[var(--surface-2)] border border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:ring-1 focus:ring-brand-500/30">
-              <option value="">Toutes</option>
+              className="h-9 w-full appearance-none rounded-lg border border-[var(--border)] bg-[var(--surface-2)] pl-8 pr-8 text-[12px] text-[var(--text)] focus:border-brand-500/50 focus:outline-none">
+              <option value="">Toutes les zones</option>
               {zones.map((z) => <option key={z} value={z}>{z}</option>)}
             </select>
+            <ChevronDown size={12} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+          </label>
+
+          <div className="flex h-9 items-center justify-between gap-3 md:col-span-2 xl:col-span-1">
+            {(search || filterStage || filterLCU || filterZone) && (
+              <button type="button" onClick={() => { setSearch(''); setFilterStage(''); setFilterLCU(''); setFilterZone('') }}
+                className="flex items-center gap-1 text-[11px] text-[var(--text-muted)] transition-colors hover:text-red-400">
+                <X size={11} /> Effacer
+              </button>
+            )}
+            <span className="ml-auto whitespace-nowrap text-[11px] text-[var(--text-muted)]">{visible.length} résultat{visible.length > 1 ? 's' : ''}</span>
           </div>
-          {(filterLCU || filterZone) && (
-            <button onClick={() => { setFilterLCU(''); setFilterZone('') }}
-              className="flex items-center gap-1 text-[11px] text-[var(--text-muted)] hover:text-red-400 transition-colors">
-              <X size={11} /> Réinitialiser
-            </button>
-          )}
-          <span className="ml-auto text-[11px] text-[var(--text-muted)]">{visible.length} lampadaire(s)</span>
         </div>
       </div>
-
-      {/* ── Batch test result summary ── */}
-      <SummaryCard summary={summary} onDismiss={() => setSummary(null)} />
 
       {/* ── Lamp list ── */}
       {visible.length === 0 ? (
         <EmptyState icon={CheckSquare}
-          title={filterMode === 'failed' ? 'Aucun échec' : 'Tout est commissionné !'}
-          description={filterMode === 'failed' ? 'Aucun lampadaire en échec.' : 'Tous les lampadaires ont été mis en service.'} />
+          title={search || filterStage || filterLCU || filterZone ? 'Aucun résultat' : filterMode === 'failed' ? 'Aucun échec' : 'Aucun lampadaire dans cette vue'}
+          description={search || filterStage || filterLCU || filterZone
+            ? 'Modifiez ou effacez les filtres pour élargir la recherche.'
+            : filterMode === 'failed' ? 'Aucun lampadaire en échec.' : 'Cette catégorie ne contient actuellement aucun lampadaire.'} />
       ) : (
-        <div className="rounded-2xl border border-[var(--border)] overflow-hidden">
-          {/* Table header */}
-          <div className="flex items-center gap-3 px-4 py-2.5 bg-[var(--surface-2)] border-b border-[var(--border)] text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-            <input type="checkbox" checked={allChecked}
-              onChange={() => allChecked ? clearSel() : selectAll()}
-              className="w-3.5 h-3.5 accent-brand-500 cursor-pointer shrink-0" />
-            <span className="w-28 shrink-0">Référence</span>
-            <span className="w-20 shrink-0">Zone</span>
-            <span className="w-24 shrink-0">LCU</span>
-            <span className="w-32 shrink-0">Contrôleur</span>
-            <span className="w-24 shrink-0">Phase</span>
-            <span className="flex-1">Statut / Raison</span>
-            <span className="w-20 shrink-0 text-right">Actions</span>
-          </div>
+        <div className="overflow-x-auto rounded-2xl border border-[var(--border)]">
+          <div className="min-w-[820px]">
+            {/* Table header */}
+            <div className="flex items-center gap-4 border-b border-[var(--border)] bg-[var(--surface-2)] px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+              <input type="checkbox" checked={allChecked} aria-label="Sélectionner tous les résultats"
+                onChange={() => allChecked ? clearSel() : selectAll()}
+                className="h-3.5 w-3.5 shrink-0 cursor-pointer accent-brand-500" />
+              <span className="w-28 shrink-0">Référence</span>
+              <span className="w-44 shrink-0">Emplacement</span>
+              <span className="w-36 shrink-0">Étape actuelle</span>
+              <span className="flex-1">Blocage / prochaine action</span>
+              <span className="w-28 shrink-0 text-right">Action</span>
+            </div>
 
-          <div className="divide-y divide-[var(--border)]">
+            <div className="divide-y divide-[var(--border)]">
             {visible.map((lamp) => {
-              const stepIdx = STEP_IDX[lamp.commissioning_status] ?? 0
               const col     = commissioningColor(lamp.commissioning_status)
               const lcu     = lcus.find((l) => l.id === lamp.lcu_id)
               const reason  = lamp.commissioning_notes || defaultReason(lamp.commissioning_status)
@@ -370,73 +558,65 @@ export default function CommissioningPage() {
               return (
                 <div key={lamp.id}
                   className={cn(
-                    'flex items-center gap-3 px-4 py-3 text-[12px] transition-colors',
+                    'flex items-center gap-4 px-4 py-3 text-[12px] transition-colors',
                     isSel ? 'bg-brand-500/5' : 'bg-[var(--surface)] hover:bg-[var(--surface-2)]'
                   )}>
-                  <input type="checkbox" checked={isSel} onChange={() => toggleSelect(lamp.id)}
-                    className="w-3.5 h-3.5 accent-brand-500 cursor-pointer shrink-0" />
+                  <input type="checkbox" checked={isSel} aria-label={`Sélectionner ${lamp.reference}`}
+                    onChange={() => toggleSelect(lamp.id)}
+                    className="h-3.5 w-3.5 shrink-0 cursor-pointer accent-brand-500" />
 
                   {/* Reference */}
                   <span className="w-28 shrink-0 font-mono font-bold text-[var(--text)] truncate">{lamp.reference}</span>
 
-                  {/* Zone */}
-                  <span className="w-20 shrink-0 text-[var(--text-muted)] truncate">{lamp.zone || '—'}</span>
-
-                  {/* LCU */}
-                  <span className="w-24 shrink-0 text-brand-500 font-mono text-[11px] truncate">
-                    {lcu?.reference || (lamp.lcu_id ? `#${lamp.lcu_id}` : '—')}
-                  </span>
-
-                  {/* Controller type */}
-                  <span className="w-32 shrink-0 text-[var(--text-muted)] text-[11px] truncate">
-                    {lamp.controller_type || '—'}
-                  </span>
-
-                  {/* Phase — step progress dots */}
-                  <div className="w-24 shrink-0 flex items-center gap-0.5">
-                    {STEPS.filter(s => s !== 'commissioned').map((s, i) => (
-                      <div key={s} className={cn('w-3 h-3 rounded-full',
-                        i < stepIdx ? 'bg-brand-500' :
-                        i === stepIdx ? 'bg-brand-500/40 ring-1 ring-brand-500' :
-                        'bg-[var(--border)]'
-                      )} title={labelCommissioning(s)} />
-                    ))}
+                  {/* Zone and LCU belong to the same mental model: location. */}
+                  <div className="w-44 shrink-0 min-w-0">
+                    <p className="truncate font-medium text-[var(--text)]">{lamp.zone || 'Zone non renseignée'}</p>
+                    <p className="mt-0.5 truncate font-mono text-[10px] text-brand-500">
+                      {lcu?.reference || (lamp.lcu_id ? `LCU #${lamp.lcu_id}` : 'Aucune LCU associée')}
+                    </p>
                   </div>
 
-                  {/* Status / reason */}
-                  <div className="flex-1 flex items-center gap-2 min-w-0">
+                  {/* One explicit stage replaces the unexplained progress dots. */}
+                  <div className="w-36 shrink-0">
                     <Badge label={labelCommissioning(lamp.commissioning_status)}
                       bg={col.bg} text={col.text} dot={col.dot} />
-                    {reason && (
-                      <span className={cn(
-                        'text-[10px] px-2 py-0.5 rounded-full border font-medium truncate',
-                        reasonColor(lamp.commissioning_status)
-                      )}>
-                        {reason}
-                      </span>
-                    )}
                   </div>
 
-                  {/* Actions — only for failed or manually manageable cases */}
-                  <div className="w-20 shrink-0 flex justify-end">
-                    {lamp.commissioning_status === 'failed' && (
-                      <button
-                        onClick={() => runFail(lamp.id)}
-                        className="text-[10px] text-[var(--text-muted)] hover:text-red-400 transition-colors px-1.5 py-1 rounded"
-                        title="Réinitialiser cet échec">
-                        <RefreshCw size={11} />
+                  {/* Explain the blocker as prose; technical controller info is secondary. */}
+                  <div className="flex min-w-0 flex-1 items-start gap-2">
+                    {lamp.commissioning_status === 'commissioned' || lamp.commissioning_status === 'tested'
+                      ? <CheckCheck size={13} className="mt-0.5 shrink-0 text-green-500" />
+                      : <AlertTriangle size={13} className={cn('mt-0.5 shrink-0', lamp.commissioning_status === 'failed' ? 'text-red-400' : 'text-amber-500')} />}
+                    <div className="min-w-0">
+                      <p className="truncate text-[11px] font-medium text-[var(--text)]">{reason}</p>
+                      {lamp.controller_type && (
+                        <p className="mt-0.5 truncate text-[10px] text-[var(--text-muted)]">Contrôleur : {lamp.controller_type}</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Contextual row action. No misleading reset button. */}
+                  <div className="flex w-28 shrink-0 justify-end">
+                    {['located', 'failed'].includes(lamp.commissioning_status) && lcu ? (
+                      <button type="button" onClick={() => navigate(`/lcus?id=${lcu.id}`)}
+                        className="rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[10px] font-medium text-[var(--text-muted)] transition-colors hover:border-brand-500/40 hover:text-brand-500">
+                        Voir la LCU
                       </button>
-                    )}
+                    ) : ['discovered', 'configured'].includes(lamp.commissioning_status) ? (
+                      <button type="button" disabled={!!batchBusy}
+                        onClick={() => runBatch('selected', { ids: [lamp.id] })}
+                        className="rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[10px] font-medium text-[var(--text-muted)] transition-colors hover:border-brand-500/40 hover:text-brand-500 disabled:cursor-not-allowed disabled:opacity-40">
+                        Réévaluer
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               )
             })}
+            </div>
           </div>
         </div>
       )}
-
-      {/* AI Page Insights */}
-      <AIPageInsights page="commissioning" title="Analyse IA de la mise en service" />
 
       {/* Click outside to close dropdowns */}
       {(lcuPickerOpen || zonePicker) && (

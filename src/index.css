@@ -4,14 +4,18 @@
 
 @layer base {
   :root {
-    --bg: #f8fafc;
+    --bg: #f4f8fb;
     --surface: #ffffff;
-    --surface-2: #f1f5f9;
-    --border: #e2e8f0;
-    --text: #0f172a;
-    --text-muted: #64748b;
-    --brand: #22c55e;
-    --brand-hover: #16a34a;
+    --surface-2: #edf4f8;
+    --border: #d8e4ec;
+    --text: #142d46;
+    --text-muted: #647b8e;
+    --brand: #0eaee8;
+    --brand-hover: #028dc5;
+    --brand-rgb: 14 174 232;
+    --primary: var(--brand);
+    --primary-hover: var(--brand-hover);
+    --logo-ink: #142d46;
     --danger: #ef4444;
     --warning: #f59e0b;
     --info: #3b82f6;
@@ -19,14 +23,18 @@
   }
 
   .dark {
-    --bg: #0f1117;
-    --surface: #1a1d27;
-    --surface-2: #212535;
-    --border: #2d3748;
-    --text: #e2e8f0;
-    --text-muted: #94a3b8;
-    --brand: #22c55e;
-    --brand-hover: #4ade80;
+    --bg: #071521;
+    --surface: #0d2031;
+    --surface-2: #142b3d;
+    --border: #234056;
+    --text: #edf8fc;
+    --text-muted: #8fa8ba;
+    --brand: #22b8ee;
+    --brand-hover: #4bc8f2;
+    --brand-rgb: 34 184 238;
+    --primary: var(--brand);
+    --primary-hover: var(--brand-hover);
+    --logo-ink: #edf8fc;
     --danger: #ef4444;
     --warning: #f59e0b;
     --info: #3b82f6;
@@ -47,6 +55,11 @@
     margin: 0;
     line-height: 1.5;
     transition: background-color 0.2s, color 0.2s;
+  }
+
+  ::selection {
+    color: var(--text);
+    background: rgb(var(--brand-rgb) / 0.25);
   }
 
   ::-webkit-scrollbar {
@@ -77,19 +90,23 @@
     border-color: var(--border);
   }
 
-  /* Leaflet map fix for dark mode — only for maps that don't manage their own tiles */
-  .dark .leaflet-tile:not(.map-page-tile) {
-    filter: brightness(0.8) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
+  .filter-label {
+    @apply block mb-1 text-[10px] font-medium;
+    color: var(--text-muted);
   }
 
-  /* MapPage manages its own tile themes — cancel inversion */
-  .dark .map-page-container .leaflet-tile {
-    filter: none !important;
+  .audit-input {
+    @apply w-full px-3 py-2 text-[11px] border rounded-lg outline-none transition-shadow;
+    color: var(--text);
+    background-color: var(--surface-2);
+    border-color: var(--border);
   }
 
-  .dark .leaflet-container {
-    background: var(--surface);
+  .audit-input:focus {
+    border-color: rgb(var(--brand-rgb) / 0.65);
+    box-shadow: 0 0 0 2px rgb(var(--brand-rgb) / 0.18);
   }
+
 }
 
 @layer utilities {
@@ -121,8 +138,8 @@
   padding: 1px;
   background: linear-gradient(120deg,
     transparent 20%,
-    rgba(34, 197, 94, 0.55),
-    rgba(59, 130, 246, 0.45),
+    rgb(var(--brand-rgb) / 0.58),
+    rgba(20, 45, 70, 0.48),
     transparent 80%);
   background-size: 220% 100%;
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
@@ -142,17 +159,17 @@
 }
 .card-hover-glow:hover {
   border-color: color-mix(in srgb, var(--brand) 45%, var(--border));
-  box-shadow: 0 8px 30px -8px rgba(34, 197, 94, 0.28), 0 0 0 1px rgba(34, 197, 94, 0.12);
+  box-shadow: 0 8px 30px -8px rgb(var(--brand-rgb) / 0.28), 0 0 0 1px rgb(var(--brand-rgb) / 0.12);
 }
 
 /* Premium AI block halo — soft always-on glow (no border conflict) */
 .ai-halo {
   border-radius: 1rem;
-  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.10), 0 10px 40px -16px rgba(34, 197, 94, 0.28);
+  box-shadow: 0 0 0 1px rgb(var(--brand-rgb) / 0.10), 0 10px 40px -16px rgb(var(--brand-rgb) / 0.28);
   transition: box-shadow 0.4s ease;
 }
 .dark .ai-halo {
-  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.14), 0 12px 46px -14px rgba(34, 197, 94, 0.32);
+  box-shadow: 0 0 0 1px rgb(var(--brand-rgb) / 0.14), 0 12px 46px -14px rgb(var(--brand-rgb) / 0.32);
 }
 
 /* Theme-aware glass panel */
@@ -163,7 +180,7 @@
   -webkit-backdrop-filter: blur(14px);
 }
 .dark .glass-panel {
-  background: rgba(26, 29, 39, 0.82);
+  background: rgba(13, 32, 49, 0.86);
   border-color: rgba(255, 255, 255, 0.08);
 }
 
@@ -215,49 +232,35 @@
   color: #0f172a;
 }
 
-/* ── Leaflet overrides ─────────────────────────────── */
-.leaflet-container { font-family: 'Inter', sans-serif; }
-
-/* MapPage zoom controls — always dark-glass since the map itself is dark */
-.map-page-container .leaflet-control-zoom a {
-  background: rgba(13,15,23,0.88) !important;
+/* ── Mapbox controls ───────────────────────────────── */
+.mapbox-page-container { font-family: 'Inter', sans-serif; }
+.mapbox-page-container .mapboxgl-ctrl-group {
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 10px;
+  background: rgba(13,15,23,0.88);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.40);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  color: #94a3b8 !important;
-  border-color: rgba(255,255,255,0.12) !important;
-  font-size: 16px !important;
-  line-height: 28px !important;
-  width: 28px !important;
-  height: 28px !important;
 }
-.map-page-container .leaflet-control-zoom a:hover {
-  background: rgba(30,35,50,0.95) !important;
-  color: #e2e8f0 !important;
+.mapbox-page-container .mapboxgl-ctrl-group button {
+  border-color: rgba(255,255,255,0.10);
 }
-.map-page-container .leaflet-control-zoom {
-  border: 1px solid rgba(255,255,255,0.1) !important;
-  border-radius: 10px !important;
-  overflow: hidden;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.4) !important;
+.mapbox-page-container .mapboxgl-ctrl-group button:hover {
+  background-color: rgba(255,255,255,0.10);
 }
-.map-page-container .leaflet-control-attribution {
-  background: rgba(13,15,23,0.65) !important;
-  color: #475569 !important;
-  font-size: 10px !important;
-  border-radius: 6px 0 0 0 !important;
+.mapbox-page-container .mapboxgl-ctrl-icon { filter: invert(1) opacity(0.68); }
+.mapbox-page-container .mapboxgl-ctrl-attrib,
+.mapbox-page-container .mapboxgl-ctrl-scale {
+  border-color: rgba(255,255,255,0.14);
+  background: rgba(13,15,23,0.72);
+  color: #94a3b8;
+  font-size: 10px;
 }
-.map-page-container .leaflet-control-attribution a { color: #64748b !important; }
+.mapbox-page-container .mapboxgl-ctrl-attrib a { color: #94a3b8; }
 
-/* Generic leaflet controls (other pages) — theme-aware */
-.leaflet-control-zoom a {
-  transition: background 0.15s, color 0.15s;
-}
-.leaflet-control-attribution {
-  font-size: 10px !important;
-}
-
-/* ── LCU map popup dark styling ────────────────────── */
-.lcu-popup .leaflet-popup-content-wrapper {
+/* ── Mapbox popup styling ──────────────────────────── */
+.lcu-popup .mapboxgl-popup-content {
   background: rgba(11, 14, 24, 0.97);
   border: 1px solid rgba(255,255,255,0.1);
   border-radius: 16px;
@@ -268,19 +271,11 @@
   padding: 0;
   overflow: hidden;
 }
-.lcu-popup .leaflet-popup-tip-container {
-  margin-top: -1px;
-}
-.lcu-popup .leaflet-popup-tip {
+.lcu-popup .mapboxgl-popup-tip {
   background: rgba(11, 14, 24, 0.97);
-  border: none;
-  box-shadow: none;
+  border-top-color: rgba(11, 14, 24, 0.97);
 }
-.lcu-popup .leaflet-popup-content {
-  margin: 0;
-  line-height: 1.4;
-}
-.lcu-popup .leaflet-popup-close-button {
+.lcu-popup .mapboxgl-popup-close-button {
   color: rgba(255,255,255,0.4) !important;
   font-size: 18px !important;
   top: 8px !important;
@@ -293,11 +288,76 @@
   justify-content: center;
   border-radius: 6px;
 }
-.lcu-popup .leaflet-popup-close-button:hover {
+.lcu-popup .mapboxgl-popup-close-button:hover {
   color: white !important;
   background: rgba(255,255,255,0.1);
 }
+.mapbox-tooltip .mapboxgl-popup-content {
+  padding: 0;
+  border-radius: 14px;
+  background: transparent;
+  box-shadow: none;
+}
+.mapbox-tooltip .mapboxgl-popup-tip { display: none; }
 /* scrollbar inside popup */
 .lcu-popup ::-webkit-scrollbar { width: 4px; }
 .lcu-popup ::-webkit-scrollbar-track { background: transparent; }
 .lcu-popup ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+
+/* MAADEN AI identity — crystalline neural mark */
+.maaden-ai-mark {
+  --maaden-ai-size: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: .58rem;
+  flex: 0 0 auto;
+  color: #68dcff;
+  vertical-align: middle;
+}
+.maaden-ai-mark__glyph {
+  width: var(--maaden-ai-size);
+  height: var(--maaden-ai-size);
+  display: block;
+  overflow: visible;
+  filter: drop-shadow(0 0 8px rgba(31, 190, 240, .18));
+}
+.maaden-ai-mark__orbit,
+.maaden-ai-mark__facet,
+.maaden-ai-mark__core,
+.maaden-ai-mark__node {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.maaden-ai-mark__wordmark {
+  display: inline-flex;
+  align-items: baseline;
+  gap: .34em;
+  white-space: nowrap;
+  font-family: Manrope, "DM Sans", system-ui, sans-serif;
+  letter-spacing: .13em;
+  line-height: 1;
+}
+.maaden-ai-mark__wordmark strong { color: var(--text, #edf8fc); font-size: .86rem; font-weight: 760; }
+.maaden-ai-mark__wordmark em { color: #37cbf7; font-size: .64rem; font-style: normal; font-weight: 800; letter-spacing: .08em; }
+.maaden-ai-mark--thinking .maaden-ai-mark__glyph {
+  filter: drop-shadow(0 0 11px rgba(39, 203, 247, .5)) drop-shadow(0 0 22px rgba(124, 92, 255, .18));
+}
+.maaden-ai-mark--thinking .maaden-ai-mark__orbit--outer { animation: maaden-ai-orbit 3.1s linear infinite; }
+.maaden-ai-mark--thinking .maaden-ai-mark__orbit--inner { animation: maaden-ai-orbit-reverse 2.15s linear infinite; }
+.maaden-ai-mark--thinking .maaden-ai-mark__aura { animation: maaden-ai-breathe 1.8s ease-in-out infinite; }
+.maaden-ai-mark--thinking .maaden-ai-mark__core { animation: maaden-ai-core 1.15s ease-in-out infinite; }
+.maaden-ai-mark--thinking .maaden-ai-mark__node--one { animation: maaden-ai-node 1.4s ease-in-out infinite; }
+.maaden-ai-mark--thinking .maaden-ai-mark__node--two { animation: maaden-ai-node 1.4s .35s ease-in-out infinite; }
+.maaden-ai-mark--thinking .maaden-ai-mark__facet { animation: maaden-ai-facet 1.9s ease-in-out infinite; }
+.maaden-ai-mark--thinking .maaden-ai-mark__facet--delay { animation-delay: .45s; }
+
+@keyframes maaden-ai-orbit { to { transform: rotate(360deg); } }
+@keyframes maaden-ai-orbit-reverse { to { transform: rotate(-360deg); } }
+@keyframes maaden-ai-breathe { 0%, 100% { opacity: .45; transform: scale(.94); } 50% { opacity: 1; transform: scale(1.12); } }
+@keyframes maaden-ai-core { 0%, 100% { opacity: .72; transform: scale(.82); } 50% { opacity: 1; transform: scale(1.35); } }
+@keyframes maaden-ai-node { 0%, 100% { opacity: .45; transform: scale(.8); } 50% { opacity: 1; transform: scale(1.35); } }
+@keyframes maaden-ai-facet { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .maaden-ai-mark *, .maaden-ai-mark--thinking * { animation: none !important; }
+}

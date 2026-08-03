@@ -1,18 +1,10 @@
 import axios from 'axios'
-import { getStoredToken } from '../context/AuthContext'
 
 const client = axios.create({
   baseURL: '/api',
   headers: { 'Content-Type': 'application/json' },
   timeout: 15000,
-})
-
-client.interceptors.request.use((config) => {
-  const token = getStoredToken()
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
-  return config
+  withCredentials: true,
 })
 
 client.interceptors.response.use(
@@ -22,9 +14,8 @@ client.interceptors.response.use(
     // Un 401 venant du proxy IA (jeton interne côté serveur) ou d'une route AI
     // ne signifie PAS que la session utilisateur a expiré — ne pas déconnecter.
     const isAIRoute = url.includes('/ai/')
-    if (err.response?.status === 401 && !isAIRoute) {
-      localStorage.removeItem('sl_auth_token')
-      localStorage.removeItem('sl_auth_user')
+    const isAuthBootstrap = url.includes('/auth/me') || url.includes('/auth/login') || url.includes('/auth/logout')
+    if (err.response?.status === 401 && !isAIRoute && !isAuthBootstrap) {
       window.location.href = '/login'
       return Promise.reject(new Error('Session expirée — veuillez vous reconnecter'))
     }

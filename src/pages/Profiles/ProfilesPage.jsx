@@ -18,6 +18,7 @@ import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
 import EmptyState from '../../components/ui/EmptyState'
 import { PageLoader } from '../../components/ui/Spinner'
+import ProfileWeatherForecast from '../../components/profiles/ProfileWeatherForecast'
 import { cn } from '../../utils/helpers'
 
 const ALL_DAYS    = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim']
@@ -667,6 +668,8 @@ function ProfileDetailPanel({ profileId, onClose, onUpdated, onToggle, toggling 
               ) : (
                 /* ── View mode ── */
                 <div className="px-5 pt-5 space-y-5 pb-6">
+                  <ProfileWeatherForecast profileId={profileId} />
+
                   {/* Timeline + schedules */}
                   <div>
                     <SectionTitle icon={<Clock size={12} />} label="Plages horaires" />

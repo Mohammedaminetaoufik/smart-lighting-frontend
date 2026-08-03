@@ -2,26 +2,28 @@ import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useTheme } from '../../context/ThemeContext'
 import {
-  MapContainer, TileLayer, Marker, Circle, Polyline,
-  Tooltip, Popup, useMap, ZoomControl, useMapEvents,
-} from 'react-leaflet'
-import L from 'leaflet'
-import 'leaflet/dist/leaflet.css'
-import MarkerClusterGroup from 'react-leaflet-cluster'
+  default as MapboxMap, Marker, Popup, Source, Layer,
+  NavigationControl, ScaleControl, FullscreenControl, GeolocateControl,
+} from 'react-map-gl/mapbox'
+import 'mapbox-gl/dist/mapbox-gl.css'
 import toast from 'react-hot-toast'
 import { getLampadaires, getMissingLocation, updateLocation, setDimming as apiSetDimming, getLatestTelemetry, assignLCU as apiAssignLCU } from '../../api/lampadaires'
 import { getLCUs, createLCU as apiCreateLCU, bulkDimLCU as apiBulkDimLCU } from '../../api/lcus'
 import { PageLoader } from '../../components/ui/Spinner'
-import Button from '../../components/ui/Button'
 import {
   Search, X, Zap, Wifi, WifiOff, Wrench, Radio,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   Layers, RefreshCw, Power, PowerOff,
-  AlertTriangle, Thermometer, Eye, Activity, MapPin,
-  LocateFixed, SkipForward, Plus, Workflow, Sparkles,
+  AlertTriangle, Eye, MapPin,
+  LocateFixed, SkipForward, Plus, Workflow, Sparkles, Maximize, Navigation,
 } from 'lucide-react'
 import { cn } from '../../utils/helpers'
 import AIEntityInsightPanel from '../../components/ai/AIEntityInsightPanel'
+import RoutePanel from '../../components/map/RoutePanel'
+import MapWorldStartup from '../../components/map/MapWorldStartup'
+import { useMapboxDirections } from '../../hooks/useMapboxDirections'
+import { MAP_STARTUP_STORAGE_KEY } from '../../utils/mapStartup'
+import { readMapMode, readMapViewState, saveMapMode, saveMapViewState } from '../../utils/mapViewState'
 
 /* ──────────────────────────────────────────────────────────────
    CONSTANTS
@@ -32,189 +34,101 @@ const STATUS = {
   maintenance: { hex: '#f59e0b', label: 'Maintenance', icon: Wrench,  tw: 'text-amber-400' },
 }
 
-const TILES = {
-  'Dark Pro':  { url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', attr: '© CARTO', maxNativeZoom: 21 },
-  'Clair':     { url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', attr: '© CARTO', maxNativeZoom: 21 },
-  'Satellite': { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr: '© Esri', maxNativeZoom: 19 },
+/* Four map modes, all built on the Mapbox Standard basemap.
+   `config` values are applied on the `basemap` import via setConfigProperty
+   after every style load; `camera` sets pitch/bearing on mode change. */
+const MAP_MODES = {
+  'Plan clair': {
+    style: 'mapbox://styles/mapbox/standard',
+    config: { lightPreset: 'day', show3dObjects: false, showPlaceLabels: true, showRoadLabels: true, showPointOfInterestLabels: true, showTransitLabels: true },
+    camera: { pitch: 0, bearing: 0 },
+  },
+  'Satellite': {
+    style: 'mapbox://styles/mapbox/standard-satellite',
+    config: { lightPreset: 'day', showPlaceLabels: true, showRoadLabels: true, showPointOfInterestLabels: false, showTransitLabels: false },
+    camera: { pitch: 0, bearing: 0 },
+  },
+  '3D jour': {
+    style: 'mapbox://styles/mapbox/standard',
+    config: { lightPreset: 'day', show3dObjects: true, showPlaceLabels: true, showRoadLabels: true, showPointOfInterestLabels: true, showTransitLabels: true },
+    camera: { pitch: 60, bearing: -20 },
+  },
+  '3D nuit': {
+    style: 'mapbox://styles/mapbox/standard',
+    config: { lightPreset: 'night', show3dObjects: true, showPlaceLabels: true, showRoadLabels: true, showPointOfInterestLabels: false, showTransitLabels: false },
+    camera: { pitch: 60, bearing: -20 },
+  },
+}
+
+/* Push a mode's Standard-basemap config to the live map. No-ops safely if
+   the style isn't fully loaded yet (the style.load handler re-applies it). */
+function applyMapboxConfig(map, modeKey) {
+  const cfg = MAP_MODES[modeKey]?.config
+  if (!map || !cfg) return
+  Object.entries(cfg).forEach(([key, value]) => {
+    try { map.setConfigProperty('basemap', key, value) } catch { /* style not ready */ }
+  })
 }
 
 const LCU_RADIUS = 600  // metres — visual coverage zone
+const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN
 
 /* ──────────────────────────────────────────────────────────────
    MARKER FACTORIES
 ───────────────────────────────────────────────────────────── */
-function makeLampIcon(etat, isSelected, hasAlert, intensity = 0) {
-  const isLit    = intensity > 0
-  const etatColor = STATUS[etat]?.hex || '#6b7280'
-
-  // fill = ON/OFF state  (green when lit, dark gray when off)
-  const fill  = isLit ? '#22c55e' : '#374151'
-  // ring = etat status color (online=green, offline=red, maintenance=amber)
-  const ring  = etatColor
-
-  const dim   = isSelected ? 20 : 14
-  const outer = dim + 16
-
-  // glow only when lit
-  const glow = isLit
-    ? isSelected
-      ? `0 0 0 3px rgba(255,255,255,0.85), 0 0 20px rgba(34,197,94,0.8), 0 0 40px rgba(34,197,94,0.35)`
-      : `0 0 10px rgba(34,197,94,0.7), 0 0 24px rgba(34,197,94,0.3)`
-    : isSelected
-      ? `0 0 0 3px rgba(255,255,255,0.7), 0 2px 8px rgba(0,0,0,0.5)`
-      : `0 2px 6px rgba(0,0,0,0.4)`
-
-  const alertRing = hasAlert
-    ? `<div class="marker-alert-ring" style="
-        position:absolute;top:50%;left:50%;
-        transform:translate(-50%,-50%);
-        width:${dim + 14}px;height:${dim + 14}px;
-        border-radius:50%;border:2px solid #ef4444;
-        pointer-events:none;"></div>`
-    : ''
-
-  const intensityArc = isLit ? buildArc(intensity) : ''
-
-  const html = `
-    <div style="position:relative;width:${outer}px;height:${outer}px;display:flex;align-items:center;justify-content:center;">
-      ${alertRing}
-      <svg width="${outer}" height="${outer}" viewBox="0 0 40 40" style="position:absolute;top:0;left:0;">
-        <circle cx="20" cy="20" r="18" fill="none" stroke="${ring}" stroke-width="1.5" stroke-opacity="${isLit ? '0.5' : '0.25'}"/>
-        ${intensityArc}
-      </svg>
-      <div style="
-        width:${dim}px;height:${dim}px;border-radius:50%;
-        background:${fill};
-        box-shadow:${glow};
-        border:2px solid rgba(255,255,255,${isSelected ? '0.95' : isLit ? '0.75' : '0.25'});
-        position:relative;z-index:1;
-        display:flex;align-items:center;justify-content:center;
-        transition: background 0.3s, box-shadow 0.3s;
-      ">
-        ${isLit
-          ? `<div style="width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,0.95);box-shadow:0 0 4px white;"></div>`
-          : `<div style="width:4px;height:4px;border-radius:50%;background:rgba(255,255,255,0.2);"></div>`
-        }
-      </div>
-    </div>`
-
-  return L.divIcon({
-    html,
-    className: '',
-    iconSize:   [outer, outer],
-    iconAnchor: [outer / 2, outer / 2],
-  })
+function LampMarkerVisual({ lamp, selected = false }) {
+  const isLit = (lamp.intensite ?? 0) > 0
+  const size = selected ? 22 : 16
+  const ring = STATUS[lamp.etat]?.hex || '#64748b'
+  return (
+    <div className="relative flex cursor-pointer items-center justify-center" style={{ width: size + 18, height: size + 18 }}>
+      {lamp.has_critical_alert && <span className="marker-alert-ring absolute inset-0 rounded-full border-2 border-red-500" />}
+      <span className="absolute rounded-full border" style={{
+        width: size + 12, height: size + 12, borderColor: ring,
+        opacity: isLit ? 0.65 : 0.35,
+        background: isLit ? `conic-gradient(rgba(255,255,255,.5) ${(lamp.intensite ?? 0) * 3.6}deg, transparent 0)` : 'transparent',
+      }} />
+      <span className="relative z-10 flex items-center justify-center rounded-full border-2" style={{
+        width: size, height: size,
+        background: isLit ? '#22c55e' : '#374151',
+        borderColor: selected ? '#fff' : 'rgba(255,255,255,.65)',
+        boxShadow: selected ? `0 0 0 3px rgba(255,255,255,.75), 0 0 24px ${ring}` : isLit ? '0 0 16px rgba(34,197,94,.65)' : '0 2px 7px rgba(0,0,0,.5)',
+      }}>
+        <span className="h-1 w-1 rounded-full bg-white/80" />
+      </span>
+    </div>
+  )
 }
 
-function buildArc(pct) {
-  if (!pct || pct <= 0) return ''
-  const r = 18, cx = 20, cy = 20
-  const startAngle = -90
-  const endAngle   = startAngle + (pct / 100) * 360
-  const start = polarToCart(cx, cy, r, startAngle)
-  const end   = polarToCart(cx, cy, r, endAngle)
-  const large = (pct / 100) * 360 > 180 ? 1 : 0
-  return `<path d="M ${start.x} ${start.y} A ${r} ${r} 0 ${large} 1 ${end.x} ${end.y}"
-    fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="2.5" stroke-linecap="round"/>`
-}
-function polarToCart(cx, cy, r, deg) {
-  const rad = (deg * Math.PI) / 180
-  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) }
-}
-
-function createClusterCustomIcon(cluster) {
-  const count = cluster.getChildCount()
-  return L.divIcon({
-    html: `
-      <div style="
-        background: rgba(15, 23, 42, 0.9);
-        border: 2px solid #3b82f6;
-        border-radius: 50%;
-        color: white;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 13px;
-        font-weight: 800;
-        width: 36px;
-        height: 36px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.5), 0 0 15px rgba(59, 130, 246, 0.4);
-        backdrop-filter: blur(4px);
-        font-family: 'Inter', sans-serif;
-      ">
-        ${count}
-      </div>`,
-    className: '',
-    iconSize: L.point(36, 36),
-    iconAnchor: [18, 18],
-  })
+function LCUMarkerVisual({ lcu, count, selected }) {
+  return (
+    <div className="flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-xl border-2 px-2.5 py-1.5 text-[11px] font-bold text-white"
+      style={{
+        background: 'linear-gradient(135deg,#0369a1,#0ea5e9)',
+        borderColor: selected ? 'rgba(255,255,255,.9)' : 'rgba(255,255,255,.35)',
+        boxShadow: selected ? '0 0 0 3px rgba(255,255,255,.65),0 0 22px rgba(14,165,233,.65)' : '0 4px 14px rgba(14,165,233,.45)',
+      }}>
+      <Radio size={11} />
+      {lcu.reference || lcu.name}
+      <span className="rounded-full bg-white/20 px-1.5 py-0.5 text-[9px]">{count}</span>
+    </div>
+  )
 }
 
-function makeLCUIcon(ref, count, isSelected) {
-  const glow = isSelected ? 'box-shadow:0 0 0 3px rgba(255,255,255,0.8),0 0 20px #3b82f688;' : 'box-shadow:0 4px 14px rgba(59,130,246,0.5);'
-  const html = `
-    <div style="
-      background:linear-gradient(135deg,#1e40af,#3b82f6);
-      border:2px solid rgba(255,255,255,${isSelected ? '0.9' : '0.35'});
-      border-radius:12px;padding:5px 10px;
-      color:white;font-size:11px;font-weight:700;
-      white-space:nowrap;${glow}
-      display:flex;align-items:center;gap:6px;
-      font-family:'Inter',sans-serif;letter-spacing:0.02em;
-    ">
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round">
-        <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
-        <path d="M1.42 9a16 16 0 0 1 21.16 0"/>
-        <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
-        <circle cx="12" cy="20" r="1.5" fill="white"/>
-      </svg>
-      ${ref}
-      <span style="background:rgba(255,255,255,0.2);border-radius:20px;padding:1px 6px;font-size:10px;">${count}</span>
-    </div>`
-  return L.divIcon({ html, className: '', iconSize: [null, 30], iconAnchor: [0, 30] })
+function circleFeature(latitude, longitude, radiusMetres, properties = {}) {
+  const points = []
+  const latRadius = radiusMetres / 111320
+  const lngRadius = radiusMetres / (111320 * Math.cos(latitude * Math.PI / 180))
+  for (let i = 0; i <= 64; i += 1) {
+    const angle = (i / 64) * Math.PI * 2
+    points.push([longitude + Math.cos(angle) * lngRadius, latitude + Math.sin(angle) * latRadius])
+  }
+  return { type: 'Feature', properties, geometry: { type: 'Polygon', coordinates: [points] } }
 }
 
 /* ──────────────────────────────────────────────────────────────
    SUB-COMPONENTS
 ───────────────────────────────────────────────────────────── */
-function FitBounds({ points }) {
-  const map = useMap()
-  useEffect(() => {
-    if (points.length > 1)
-      map.fitBounds(L.latLngBounds(points), { padding: [60, 60], maxZoom: 19 })
-    else if (points.length === 1)
-      map.setView(points[0], 18)
-  }, [])
-  return null
-}
-
-function MapController({ mapRef }) {
-  const map = useMap()
-  useEffect(() => { mapRef.current = map }, [map, mapRef])
-  return null
-}
-
-function MapClickHandler({ onClose, onPlace, placing, addingLCU, onDropLCU }) {
-  const map = useMap()
-  useEffect(() => {
-    map.getContainer().style.cursor = (placing || addingLCU) ? 'crosshair' : ''
-    return () => { map.getContainer().style.cursor = '' }
-  }, [placing, addingLCU, map])
-
-  useMapEvents({
-    click(e) {
-      if (placing) {
-        onPlace(e.latlng.lat, e.latlng.lng)
-      } else if (addingLCU) {
-        onDropLCU(e.latlng)
-      } else {
-        onClose()
-      }
-    },
-  })
-  return null
-}
-
 /* ──────────────────────────────────────────────────────────────
    LAMP TOGGLE — green pill when ON, dark when OFF
 ───────────────────────────────────────────────────────────── */
@@ -261,6 +175,26 @@ function LampToggle({ lamp, onToggle, disabled, size = 'sm' }) {
    MAIN COMPONENT
 ───────────────────────────────────────────────────────────── */
 export default function MapPage() {
+  const [showMapStartup, setShowMapStartup] = useState(() =>
+    import.meta.env.MODE !== 'test' &&
+    sessionStorage.getItem(MAP_STARTUP_STORAGE_KEY) !== 'shown'
+  )
+  const finishMapStartup = useCallback(() => setShowMapStartup(false), [])
+
+  useEffect(() => {
+    if (showMapStartup) sessionStorage.setItem(MAP_STARTUP_STORAGE_KEY, 'shown')
+  }, [showMapStartup])
+
+  return (
+    <div className="relative isolate min-h-[calc(100vh-7rem)]">
+      <MapPageContent />
+      {showMapStartup && <MapWorldStartup onComplete={finishMapStartup} />}
+    </div>
+  )
+}
+
+function MapPageContent() {
+  const savedMapViewRef = useRef(readMapViewState())
   const [lamps,       setLamps]       = useState([])
   const [lcus,        setLCUs]        = useState([])
   const [missing,     setMissing]     = useState([])   // lamps without GPS
@@ -269,12 +203,16 @@ export default function MapPage() {
   const [filters,     setFilters]     = useState({ online:true, offline:true, maintenance:true })
   const [search,      setSearch]      = useState('')
   const { theme } = useTheme()
-  const [tile,        setTile]        = useState(theme === 'dark' ? 'Dark Pro' : 'Clair')
+  const [mapMode,     setMapMode]     = useState(() => readMapMode(theme === 'dark' ? '3D nuit' : 'Plan clair'))
+  const mapModeRef = useRef(mapMode)   // read by the persistent style.load handler
+  const skipInitialModeCameraRef = useRef(Boolean(savedMapViewRef.current))
   const [sideOpen,    setSideOpen]    = useState(true)
   const [showZones,   setShowZones]   = useState(true)
   const [showLines,   setShowLines]   = useState(true)
   const [placing,     setPlacing]     = useState(null) // { queue:[], idx:0 } or null
   const [savingLoc,   setSavingLoc]   = useState(false)
+  const [repositioning, setRepositioning] = useState(null) // selected LP + draft/original GPS coordinates
+  const [savingReposition, setSavingReposition] = useState(false)
   const [expandedLCU, setExpandedLCU] = useState(null) // lcu.id expanded in sidebar
   const [togglingLamp, setTogglingLamp] = useState(() => new Set())
   const [togglingLCU,  setTogglingLCU]  = useState(() => new Set())
@@ -284,12 +222,46 @@ export default function MapPage() {
   const [newLCUForm,  setNewLCUForm]  = useState({ reference:'', name:'', ip_address:'', port:'8080', zone:'' })
   const [savingLCU,   setSavingLCU]   = useState(false)
   const mapRef = useRef(null)
+  const initialFitDone = useRef(Boolean(savedMapViewRef.current))
+  const [mapLoaded, setMapLoaded] = useState(false)
+  const [hoveredLamp, setHoveredLamp] = useState(null)
   const [activeTab, setActiveTab] = useState('network')
   const [aiPanel, setAiPanel] = useState(null) // { entityType, entityId }
   const [searchParams, setSearchParams] = useSearchParams()
 
+  // Driving-directions state + actions (logic lives in the dedicated hook)
+  const { route, status: routeStatus, error: routeError, calculateDrivingRoute, clearRoute } = useMapboxDirections()
+
+  // Route line colour comes from the theme (--brand), never hardcoded
+  const routeColor = useMemo(() => {
+    if (typeof window === 'undefined') return '#0eaee8'
+    const v = getComputedStyle(document.documentElement).getPropertyValue('--brand').trim()
+    return v || '#0eaee8'
+    // theme is a trigger: --brand changes value when the theme toggles
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [theme])
+
+  const routeGeoJSON = useMemo(
+    () => (route?.geometry ? { type: 'Feature', properties: {}, geometry: route.geometry } : null),
+    [route],
+  )
+
+  /* Build the destination descriptor from a selected LCU/lamp and request a
+     route. Only ever invoked from the "Itinéraire" button — never on load. */
+  const handleDirections = useCallback((type, entity) => {
+    calculateDrivingRoute({
+      destination: {
+        id: entity.id,
+        type,
+        label: entity.reference || entity.name || (type === 'lcu' ? 'LCU' : 'Lampadaire'),
+        longitude: entity.longitude,
+        latitude: entity.latitude,
+      },
+    })
+  }, [calculateDrivingRoute])
+
   const flyTo = useCallback((lat, lng, zoom = 18) => {
-    mapRef.current?.flyTo([lat, lng], zoom, { animate: true, duration: 0.8 })
+    mapRef.current?.flyTo({ center: [Number(lng), Number(lat)], zoom, duration: 800 })
   }, [])
 
   const toggleLamp = useCallback(async (lamp, on) => {
@@ -414,12 +386,80 @@ export default function MapPage() {
     else setPlacing((p) => ({ ...p, idx: nextIdx }))
   }, [placing])
 
+  const startReposition = useCallback((lamp) => {
+    if (lamp?.latitude == null || lamp?.longitude == null) {
+      toast.error('Ce lampadaire doit d’abord être localisé.')
+      return
+    }
+    const latitude = Number(lamp.latitude)
+    const longitude = Number(lamp.longitude)
+    setPlacing(null)
+    setAddingLCU(false)
+    setNewLCUPos(null)
+    setRepositioning({
+      lampId: lamp.id,
+      reference: lamp.reference,
+      originalLatitude: latitude,
+      originalLongitude: longitude,
+      latitude,
+      longitude,
+    })
+    flyTo(latitude, longitude, 19)
+  }, [flyTo])
+
+  const updateRepositionDraft = useCallback((latitude, longitude) => {
+    setRepositioning((current) => current ? {
+      ...current,
+      latitude: Number(latitude),
+      longitude: Number(longitude),
+    } : current)
+  }, [])
+
+  const cancelReposition = useCallback(() => {
+    if (savingReposition) return
+    setRepositioning(null)
+  }, [savingReposition])
+
+  const saveReposition = useCallback(async () => {
+    if (!repositioning || savingReposition) return
+    setSavingReposition(true)
+    try {
+      const { lampId, latitude, longitude, reference } = repositioning
+      await updateLocation(lampId, { latitude, longitude })
+      const updateLampPosition = (lamp) => lamp.id === lampId ? {
+        ...lamp,
+        latitude,
+        longitude,
+        location_status: 'confirmed',
+        commissioning_status: lamp.commissioning_status === 'discovered' ? 'located' : lamp.commissioning_status,
+      } : lamp
+      setLamps((current) => current.map(updateLampPosition))
+      setMissing((current) => current.filter((lamp) => lamp.id !== lampId))
+      setSelected((current) => current?.type === 'lamp' && current.data.id === lampId
+        ? { ...current, data: updateLampPosition(current.data) }
+        : current)
+      setRepositioning(null)
+      toast.success(`Position de ${reference} mise à jour`)
+    } catch (error) {
+      toast.error(error?.response?.data?.error || error.message)
+    } finally {
+      setSavingReposition(false)
+    }
+  }, [repositioning, savingReposition])
+
   useEffect(load, [load])
+
+  // Changing the selected entity cancels an unfinished move without mutating data.
+  useEffect(() => {
+    if (repositioning && (selected?.type !== 'lamp' || selected.data.id !== repositioning.lampId)) {
+      setRepositioning(null)
+    }
+  }, [selected, repositioning])
 
   /* silent auto-refresh every 30s — keeps the map live without the loading spinner */
   useEffect(() => {
     const id = setInterval(() => {
-      if (placing || addingLCU) return // don't disturb active placement flows
+      if (placing || addingLCU || repositioning) return // don't disturb active placement flows
       Promise.all([
         getLampadaires().catch(() => null),
         getLCUs().catch(() => null),
@@ -429,7 +469,7 @@ export default function MapPage() {
       })
     }, 30_000)
     return () => clearInterval(id)
-  }, [placing, addingLCU])
+  }, [placing, addingLCU, repositioning])
 
   /* highlight entity from URL params (e.g. navigated from AlertsPage) */
   useEffect(() => {
@@ -476,10 +516,37 @@ export default function MapPage() {
     return true
   }), [lamps, filters, search])
 
-  const visibleLCUs = useMemo(() => lcus.filter((l) => l.latitude && l.longitude), [lcus])
+  const visibleLCUs = useMemo(() => lcus.filter((l) => l.latitude != null && l.longitude != null), [lcus])
 
   const allPoints = useMemo(() =>
-    filtered.map((l) => [l.latitude, l.longitude]), [filtered])
+    filtered.map((l) => [Number(l.longitude), Number(l.latitude)]), [filtered])
+
+  const lampGeoJSON = useMemo(() => ({
+    type: 'FeatureCollection',
+    features: filtered
+      .filter((lamp) => !(selected?.type === 'lamp' && selected.data.id === lamp.id))
+      .map((lamp) => ({
+        type: 'Feature',
+        id: lamp.id,
+        properties: {
+          id: lamp.id,
+          reference: lamp.reference || '',
+          etat: lamp.etat || 'unknown',
+          intensity: Number(lamp.intensite ?? 0),
+          hasAlert: Boolean(lamp.has_critical_alert),
+          zone: lamp.zone || '',
+        },
+        geometry: { type: 'Point', coordinates: [Number(lamp.longitude), Number(lamp.latitude)] },
+      })),
+  }), [filtered, selected])
+
+  const coverageGeoJSON = useMemo(() => ({
+    type: 'FeatureCollection',
+    features: showZones ? visibleLCUs.map((lcu) => circleFeature(
+      Number(lcu.latitude), Number(lcu.longitude), LCU_RADIUS,
+      { id: lcu.id, selected: selected?.type === 'lcu' && selected.data.id === lcu.id }
+    )) : [],
+  }), [showZones, visibleLCUs, selected])
 
   /* selected LCU lines */
   const connectionLines = useMemo(() => {
@@ -488,8 +555,15 @@ export default function MapPage() {
     if (!lcu.latitude || !lcu.longitude) return []
     return (lampsByLCU[lcu.id] || [])
       .filter((l) => l.latitude && l.longitude)
-      .map((l) => [[lcu.latitude, lcu.longitude], [l.latitude, l.longitude]])
+      .map((l) => [[Number(lcu.longitude), Number(lcu.latitude)], [Number(l.longitude), Number(l.latitude)]])
   }, [selected, lampsByLCU, showLines])
+
+  const connectionGeoJSON = useMemo(() => ({
+    type: 'FeatureCollection',
+    features: connectionLines.map((coordinates, index) => ({
+      type: 'Feature', id: index, properties: {}, geometry: { type: 'LineString', coordinates },
+    })),
+  }), [connectionLines])
 
   const handleCreateLCU = async () => {
     if (!newLCUPos || !newLCUForm.reference.trim()) return
@@ -518,8 +592,143 @@ export default function MapPage() {
   }
 
   const center = filtered[0]
-    ? [filtered[0].latitude, filtered[0].longitude]
-    : [36.7372, 3.0865]
+    ? { latitude: Number(filtered[0].latitude), longitude: Number(filtered[0].longitude) }
+    : { latitude: 36.7372, longitude: 3.0865 }
+
+  const handleMapClick = useCallback((event) => {
+    const map = mapRef.current?.getMap?.()
+    const queryLayers = ['lamp-clusters', 'lamp-points'].filter((id) => map?.getLayer(id))
+    const feature = queryLayers.length ? map.queryRenderedFeatures(event.point, { layers: queryLayers })[0] : null
+
+    if (feature?.layer?.id === 'lamp-clusters') {
+      const source = map.getSource('lamps')
+      source?.getClusterExpansionZoom(feature.properties.cluster_id, (error, zoom) => {
+        if (!error) map.easeTo({ center: feature.geometry.coordinates, zoom })
+      })
+      return
+    }
+
+    if (feature?.layer?.id === 'lamp-points') {
+      const lamp = lamps.find((item) => Number(item.id) === Number(feature.properties.id))
+      if (lamp) {
+        setSelected({ type: 'lamp', data: lamp })
+        setHoveredLamp(null)
+      }
+      return
+    }
+
+    const { lat, lng } = event.lngLat
+    if (placing) handlePlace(lat, lng)
+    else if (addingLCU) { setNewLCUPos({ lat, lng }); setAddingLCU(false) }
+    else if (repositioning) updateRepositionDraft(lat, lng)
+    else setSelected(null)
+  }, [lamps, placing, handlePlace, addingLCU, repositioning, updateRepositionDraft])
+
+  const handleMapMouseMove = useCallback((event) => {
+    const map = mapRef.current?.getMap?.()
+    if (!map) return
+    const queryLayers = ['lamp-clusters', 'lamp-points'].filter((id) => map.getLayer(id))
+    const feature = queryLayers.length ? map.queryRenderedFeatures(event.point, { layers: queryLayers })[0] : null
+    map.getCanvas().style.cursor = placing || addingLCU || repositioning ? 'crosshair' : feature ? 'pointer' : ''
+    if (feature?.layer?.id === 'lamp-points') {
+      const lamp = lamps.find((item) => Number(item.id) === Number(feature.properties.id))
+      setHoveredLamp((current) => current?.id === lamp?.id ? current : lamp || null)
+    } else {
+      setHoveredLamp((current) => current ? null : current)
+    }
+  }, [lamps, placing, addingLCU, repositioning])
+
+  useEffect(() => {
+    if (!mapLoaded || initialFitDone.current || allPoints.length === 0) return
+    initialFitDone.current = true
+    if (allPoints.length === 1) {
+      mapRef.current?.flyTo({ center: allPoints[0], zoom: 18, duration: 0 })
+      return
+    }
+    const lngs = allPoints.map((point) => point[0])
+    const lats = allPoints.map((point) => point[1])
+    mapRef.current?.fitBounds(
+      [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
+      { padding: 60, maxZoom: 19, duration: 0 }
+    )
+  }, [mapLoaded, allPoints])
+
+  /* Keep the ref in sync so the persistent style.load handler applies the
+     current mode's config after Mapbox reloads a Standard style. */
+  useEffect(() => {
+    mapModeRef.current = mapMode
+    saveMapMode(mapMode)
+  }, [mapMode])
+
+  /* On mode change: ease the camera (pitch/bearing) and re-apply the basemap
+     config. Config is applied here directly for same-style switches
+     (e.g. 3D jour ↔ 3D nuit share the Standard style, so style.load never
+     fires); cross-style switches are covered by the style.load handler. */
+  useEffect(() => {
+    if (!mapLoaded) return
+    const map = mapRef.current?.getMap?.()
+    if (!map) return
+    const mode = MAP_MODES[mapMode]
+    if (skipInitialModeCameraRef.current) {
+      skipInitialModeCameraRef.current = false
+      if (map.isStyleLoaded()) applyMapboxConfig(map, mapMode)
+      return
+    }
+    if (mode?.camera) {
+      map.easeTo({ pitch: mode.camera.pitch, bearing: mode.camera.bearing, duration: 700 })
+    }
+    if (map.isStyleLoaded()) applyMapboxConfig(map, mapMode)
+  }, [mapMode, mapLoaded])
+
+  /* Recenter the camera to frame every visible equipment (lamps + LCUs).
+     Uses only DB-stored coordinates — never the user's geolocation. */
+  const recenterAll = useCallback(() => {
+    const points = [
+      ...filtered.map((l) => [Number(l.longitude), Number(l.latitude)]),
+      ...visibleLCUs.map((l) => [Number(l.longitude), Number(l.latitude)]),
+    ].filter(([lng, lat]) => Number.isFinite(lng) && Number.isFinite(lat))
+    if (!points.length) { toast('Aucun équipement localisé', { icon: 'ℹ️' }); return }
+    const map = mapRef.current
+    if (points.length === 1) { map?.flyTo({ center: points[0], zoom: 17, duration: 800 }); return }
+    const lngs = points.map((p) => p[0])
+    const lats = points.map((p) => p[1])
+    map?.fitBounds(
+      [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
+      { padding: 80, maxZoom: 18, duration: 800 }
+    )
+  }, [filtered, visibleLCUs])
+
+  /* Frame the whole route once it's computed. Padding accounts for the left
+     sidebar, the bottom details card and the right-hand route/legend panels. */
+  useEffect(() => {
+    if (routeStatus !== 'ready' || !route?.geometry?.coordinates?.length) return
+    const coords = route.geometry.coordinates
+    const lngs = coords.map((c) => c[0])
+    const lats = coords.map((c) => c[1])
+    mapRef.current?.fitBounds(
+      [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
+      {
+        padding: {
+          top: 90,
+          bottom: selected ? 220 : 90, // bottom details card
+          left: sideOpen ? 300 : 70,   // left sidebar
+          right: 290,                  // route panel + legend
+        },
+        duration: 900,
+      },
+    )
+    // Refit only when a new route arrives, not on every panel toggle.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeStatus, route])
+
+  /* Selecting a different equipment removes the previous route. Recalculation
+     happens only when the user clicks the button again (never automatic). */
+  useEffect(() => {
+    if (!route || !selected) return
+    const sameTarget = selected.type === route.destination?.type
+      && Number(selected.data?.id) === Number(route.destination?.id)
+    if (!sameTarget) clearRoute()
+  }, [selected, route, clearRoute])
 
   const stats = useMemo(() => ({
     lit:         lamps.filter((l) => (l.intensite ?? 0) > 0).length,
@@ -530,147 +739,231 @@ export default function MapPage() {
     alerts:      lamps.filter((l) => l.has_critical_alert).length,
   }), [lamps])
 
+  const repositionChanged = repositioning
+    ? Math.abs(repositioning.latitude - repositioning.originalLatitude) > 1e-9
+      || Math.abs(repositioning.longitude - repositioning.originalLongitude) > 1e-9
+    : false
+
   if (loading) return <PageLoader />
 
+  if (!MAPBOX_TOKEN) {
+    return (
+      <div className="flex min-h-[420px] items-center justify-center rounded-2xl border border-red-500/25 bg-red-500/5 p-8 text-center">
+        <div>
+          <AlertTriangle size={24} className="mx-auto text-red-400" />
+          <p className="mt-3 text-sm font-semibold text-[var(--text)]">Jeton Mapbox non configuré</p>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">Ajoutez VITE_MAPBOX_ACCESS_TOKEN dans le fichier .env du frontend.</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="relative flex h-[calc(100vh-3.5rem-3rem)] -m-4 lg:-m-6 overflow-hidden bg-[var(--bg)]">
+    <div id="map-page-root" className="relative flex h-[calc(100vh-3.5rem-3rem)] -m-4 lg:-m-6 overflow-hidden bg-[var(--bg)]">
 
       {/* ═══ MAP ═══════════════════════════════════════════════ */}
-      <MapContainer center={center} zoom={14} minZoom={3} maxZoom={21}
-        style={{ flex:1, height:'100%' }} className="z-0 map-page-container" zoomControl={false}>
-        <TileLayer key={tile} url={TILES[tile].url} attribution={TILES[tile].attr}
-          maxZoom={21} maxNativeZoom={TILES[tile].maxNativeZoom} />
-        <ZoomControl position="bottomright" />
-        <MapController mapRef={mapRef} />
-        {allPoints.length > 0 && <FitBounds points={allPoints} />}
-        <MapClickHandler onClose={() => setSelected(null)} onPlace={handlePlace} placing={!!placing}
-          addingLCU={addingLCU} onDropLCU={(latlng) => { setNewLCUPos(latlng); setAddingLCU(false) }} />
+      <MapboxMap
+        ref={mapRef}
+        mapboxAccessToken={MAPBOX_TOKEN}
+        initialViewState={savedMapViewRef.current ?? { ...center, zoom: 14, bearing: 0, pitch: 0 }}
+        minZoom={3}
+        maxZoom={21}
+        mapStyle={MAP_MODES[mapMode].style}
+        reuseMaps
+        attributionControl
+        style={{ flex: 1, height: '100%' }}
+        className="mapbox-page-container"
+        cursor={placing || addingLCU || repositioning ? 'crosshair' : 'grab'}
+        onLoad={(event) => {
+          const map = event.target
+          // Re-apply the current mode's Standard-basemap config after every
+          // style (re)load. Registered once; persists across style switches
+          // and reads the latest mode via the ref, so no duplicate handlers.
+          map.on('style.load', () => applyMapboxConfig(map, mapModeRef.current))
+          applyMapboxConfig(map, mapModeRef.current)
+          setMapLoaded(true)
+        }}
+        onClick={handleMapClick}
+        onMoveEnd={(event) => saveMapViewState(event.viewState)}
+        onMouseMove={handleMapMouseMove}
+        onMouseLeave={() => setHoveredLamp(null)}
+      >
+        <NavigationControl position="bottom-right" showCompass visualizePitch />
+        <ScaleControl position="bottom-left" unit="metric" />
+        {/* User geolocation only — equipment positions always come from the DB */}
+        <GeolocateControl position="bottom-right" positionOptions={{ enableHighAccuracy: true }}
+          trackUserLocation showUserHeading />
+        {/* Fullscreen targets the whole map page (map + network sidebar +
+            stats + panels), not just the map canvas — the app chrome around
+            it is excluded, but every map overlay stays visible. */}
+        <FullscreenControl position="top-right" containerId="map-page-root" />
 
         {/* LCU coverage zones */}
-        {showZones && visibleLCUs.map((lcu) => (
-          <Circle key={`zone-${lcu.id}`}
-            center={[lcu.latitude, lcu.longitude]}
-            radius={LCU_RADIUS}
-            pathOptions={{
-              color: '#3b82f6',
-              fillColor: '#3b82f6',
-              fillOpacity: selected?.data?.id === lcu.id ? 0.10 : 0.04,
-              weight: selected?.data?.id === lcu.id ? 1.5 : 0.8,
-              dashArray: '6 4',
-              opacity: 0.5,
-            }}
-          />
-        ))}
+        <Source id="lcu-coverage" type="geojson" data={coverageGeoJSON}>
+          <Layer id="lcu-coverage-fill" type="fill" paint={{
+            'fill-color': '#0ea5e9',
+            'fill-opacity': ['case', ['boolean', ['get', 'selected'], false], 0.13, 0.045],
+          }} />
+          <Layer id="lcu-coverage-line" type="line" paint={{
+            'line-color': '#38bdf8',
+            'line-width': ['case', ['boolean', ['get', 'selected'], false], 2, 1],
+            'line-opacity': 0.55,
+            'line-dasharray': [3, 2],
+          }} />
+        </Source>
 
-        {/* LCU → lamp connection lines (when LCU selected) */}
-        {connectionLines.map((pos, i) => (
-          <Polyline key={i} positions={pos}
-            pathOptions={{ color: '#3b82f6', weight: 1, opacity: 0.45, dashArray: '4 6' }} />
-        ))}
+        {/* LCU → LP connection lines */}
+        <Source id="lcu-connections" type="geojson" data={connectionGeoJSON}>
+          <Layer id="lcu-connections-line" type="line" paint={{
+            'line-color': '#38bdf8', 'line-width': 1.5, 'line-opacity': 0.55, 'line-dasharray': [2, 3],
+          }} />
+        </Source>
 
-        {/* Clustered Lamp markers */}
-        <MarkerClusterGroup
-          chunkedLoading
-          maxClusterRadius={60}
-          disableClusteringAtZoom={17}
-          iconCreateFunction={createClusterCustomIcon}
-        >
-          {filtered
-            .filter((l) => !(selected?.type === 'lamp' && selected.data.id === l.id))
-            .map((lamp) => {
-              const isLit = (lamp.intensite ?? 0) > 0
-              return (
-                <Marker
-                  key={`${lamp.id}-${isLit ? 1 : 0}`}
-                  position={[lamp.latitude, lamp.longitude]}
-                  icon={makeLampIcon(lamp.etat, false, lamp.has_critical_alert, lamp.intensite)}
-                  zIndexOffset={lamp.has_critical_alert ? 1000 : 0}
-                  eventHandlers={{ click: (e) => { e.originalEvent.stopPropagation(); setSelected({ type: 'lamp', data: lamp }) } }}
-                >
-                  <Tooltip direction="top" offset={[0, -8]} opacity={1}
-                    className="!bg-transparent !border-0 !shadow-none !p-0">
-                    <div className="map-glass px-2.5 py-1.5 text-[11px] font-medium whitespace-nowrap">
-                      <span className="font-mono">{lamp.reference}</span>
-                      <span className="mx-1.5 opacity-40">·</span>
-                      <span style={{ color: STATUS[lamp.etat]?.hex }}>{STATUS[lamp.etat]?.label}</span>
-                      <span className="mx-1.5 opacity-40">·</span>
-                      <span className="text-white/70">{lamp.intensite ?? 0}%</span>
-                    </div>
-                  </Tooltip>
-                </Marker>
-              )
-            })
-          }
-        </MarkerClusterGroup>
+        {/* Driving route — declared in JSX so react-map-gl re-adds it after a
+            style switch. Kept below the lamp layers so points stay clickable. */}
+        {routeGeoJSON && (
+          <Source id="route-source" type="geojson" data={routeGeoJSON}>
+            <Layer id="route-line-casing" type="line"
+              layout={{ 'line-join': 'round', 'line-cap': 'round' }}
+              paint={{ 'line-color': '#0b1220', 'line-width': 10, 'line-opacity': 0.35, 'line-blur': 1 }} />
+            <Layer id="route-line" type="line"
+              layout={{ 'line-join': 'round', 'line-cap': 'round' }}
+              paint={{ 'line-color': routeColor, 'line-width': 6, 'line-opacity': 0.9, 'line-emissive-strength': 1 }} />
+          </Source>
+        )}
 
-        {/* Selected lamp (always outside cluster for visibility) */}
-        {selected?.type === 'lamp' && selected.data.latitude && selected.data.longitude && (
-          <Marker
-            key={`selected-${selected.data.id}-${(selected.data.intensite ?? 0) > 0 ? 1 : 0}`}
-            position={[selected.data.latitude, selected.data.longitude]}
-            icon={makeLampIcon(selected.data.etat, true, selected.data.has_critical_alert, selected.data.intensite)}
-            zIndexOffset={2000}
-            eventHandlers={{ click: (e) => { e.originalEvent.stopPropagation(); setSelected({ type: 'lamp', data: selected.data }) } }}
-          >
-            <Tooltip direction="top" offset={[0, -8]} opacity={1}
-              className="!bg-transparent !border-0 !shadow-none !p-0">
-              <div className="map-glass px-2.5 py-1.5 text-[11px] font-medium whitespace-nowrap">
-                <span className="font-mono">{selected.data.reference}</span>
-                <span className="mx-1.5 opacity-40">·</span>
-                <span style={{ color: STATUS[selected.data.etat]?.hex }}>{STATUS[selected.data.etat]?.label}</span>
-                <span className="mx-1.5 opacity-40">·</span>
-                <span className="text-white/70">{selected.data.intensite ?? 0}%</span>
-              </div>
-            </Tooltip>
+        {/* Route start (user position) marker — one instance, updated in place */}
+        {route?.start && Number.isFinite(route.start.longitude) && Number.isFinite(route.start.latitude) && (
+          <Marker longitude={route.start.longitude} latitude={route.start.latitude} anchor="center">
+            <div className="flex h-4 w-4 items-center justify-center rounded-full border-2 border-white"
+              style={{ background: routeColor, boxShadow: `0 0 12px ${routeColor}` }}>
+              <span className="h-1.5 w-1.5 rounded-full bg-white" />
+            </div>
           </Marker>
         )}
 
-        {/* New-LCU preview marker */}
+        {/* Route destination marker */}
+        {route?.destination && Number.isFinite(Number(route.destination.longitude)) && Number.isFinite(Number(route.destination.latitude)) && (
+          <Marker longitude={Number(route.destination.longitude)} latitude={Number(route.destination.latitude)} anchor="bottom">
+            <div className="flex flex-col items-center" style={{ color: routeColor }}>
+              <div className="rounded-lg border border-white/70 px-2 py-0.5 text-[10px] font-bold text-white"
+                style={{ background: routeColor, boxShadow: `0 0 12px ${routeColor}` }}>
+                {route.destination.label}
+              </div>
+              <MapPin size={20} className="-mt-0.5 drop-shadow" fill={routeColor} stroke="#fff" strokeWidth={1.5} />
+            </div>
+          </Marker>
+        )}
+
+        {/* Native Mapbox WebGL clustering for lampadaires */}
+        <Source id="lamps" type="geojson" data={lampGeoJSON} cluster clusterMaxZoom={16} clusterRadius={60}>
+          <Layer id="lamp-clusters" type="circle" filter={['has', 'point_count']} paint={{
+            'circle-color': '#082f49',
+            'circle-radius': ['step', ['get', 'point_count'], 18, 25, 23, 100, 28],
+            'circle-stroke-width': 2,
+            'circle-stroke-color': '#0ea5e9',
+            'circle-opacity': 0.94,
+            'circle-emissive-strength': 1,
+          }} />
+          <Layer id="lamp-cluster-count" type="symbol" filter={['has', 'point_count']} layout={{
+            'text-field': ['get', 'point_count_abbreviated'],
+            'text-size': 12,
+            'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Bold'],
+          }} paint={{ 'text-color': '#ffffff' }} />
+          <Layer id="lamp-points" type="circle" filter={['!', ['has', 'point_count']]} paint={{
+            'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 5, 17, 8],
+            'circle-color': ['case',
+              ['>', ['get', 'intensity'], 0], '#22c55e',
+              ['match', ['get', 'etat'], 'offline', '#ef4444', 'maintenance', '#f59e0b', '#475569'],
+            ],
+            'circle-stroke-width': ['case', ['boolean', ['get', 'hasAlert'], false], 3, 2],
+            'circle-stroke-color': ['case', ['boolean', ['get', 'hasAlert'], false], '#ef4444', '#ffffff'],
+            'circle-opacity': 0.95,
+            'circle-blur': ['case', ['>', ['get', 'intensity'], 0], 0.14, 0],
+            'circle-emissive-strength': 1,
+          }} />
+        </Source>
+
+        {/* Hover information for an unclustered LP */}
+        {hoveredLamp && !(selected?.type === 'lamp' && selected.data.id === hoveredLamp.id) && (
+          <Popup longitude={Number(hoveredLamp.longitude)} latitude={Number(hoveredLamp.latitude)}
+            anchor="bottom" offset={12} closeButton={false} closeOnClick={false} className="mapbox-tooltip">
+            <div className="map-glass whitespace-nowrap px-2.5 py-1.5 text-[11px] font-medium text-white">
+              <span className="font-mono">{hoveredLamp.reference}</span>
+              <span className="mx-1.5 opacity-40">·</span>
+              <span style={{ color: STATUS[hoveredLamp.etat]?.hex }}>{STATUS[hoveredLamp.etat]?.label}</span>
+              <span className="mx-1.5 opacity-40">·</span>
+              <span className="text-white/70">{hoveredLamp.intensite ?? 0}%</span>
+            </div>
+          </Popup>
+        )}
+
+        {/* Selected LP stays outside the cluster and remains draggable. */}
+        {selected?.type === 'lamp' && selected.data.latitude != null && selected.data.longitude != null && (
+          <Marker
+            longitude={repositioning?.lampId === selected.data.id ? repositioning.longitude : Number(selected.data.longitude)}
+            latitude={repositioning?.lampId === selected.data.id ? repositioning.latitude : Number(selected.data.latitude)}
+            anchor="center"
+            draggable={repositioning?.lampId === selected.data.id}
+            onDragEnd={(event) => {
+              if (repositioning?.lampId === selected.data.id) updateRepositionDraft(event.lngLat.lat, event.lngLat.lng)
+            }}
+            onClick={(event) => event.originalEvent.stopPropagation()}>
+            <LampMarkerVisual lamp={selected.data} selected />
+          </Marker>
+        )}
+
+        {/* New LCU preview */}
         {newLCUPos && (
-          <Marker position={[newLCUPos.lat, newLCUPos.lng]}
-            icon={makeLCUIcon('NOUVEAU', 0, true)} />
+          <Marker longitude={newLCUPos.lng} latitude={newLCUPos.lat} anchor="bottom">
+            <LCUMarkerVisual lcu={{ reference: 'NOUVEAU' }} count={0} selected />
+          </Marker>
         )}
 
         {/* LCU markers */}
         {visibleLCUs.map((lcu) => {
           const isSelected = selected?.type === 'lcu' && selected.data.id === lcu.id
-          const group = lampsByLCU[lcu.id] || []
-          const count = group.length
+          const count = (lampsByLCU[lcu.id] || []).length
           return (
-            <Marker key={`lcu-${lcu.id}`}
-              position={[lcu.latitude, lcu.longitude]}
-              icon={makeLCUIcon(lcu.reference || lcu.name, count, isSelected)}
-              zIndexOffset={isSelected ? 2000 : 500}
-              eventHandlers={{ click: (e) => { e.originalEvent.stopPropagation(); setSelected({ type:'lcu', data:lcu }); setExpandedLCU(lcu.id) } }}
-            >
-              <Tooltip direction="top" offset={[40, -4]} opacity={1}
-                className="!bg-transparent !border-0 !shadow-none !p-0">
-                <div className="map-glass px-2.5 py-1.5 text-[11px] font-medium whitespace-nowrap">
-                  {lcu.name || lcu.reference}
-                  <span className="mx-1.5 opacity-40">·</span>
-                  <span className="text-blue-400">{count} lampadaires</span>
-                  {lcu.status && (
-                    <><span className="mx-1.5 opacity-40">·</span>
-                    <span style={{ color: STATUS[lcu.status]?.hex || '#94a3b8' }}>{STATUS[lcu.status]?.label || lcu.status}</span></>
-                  )}
-                </div>
-              </Tooltip>
-              <Popup className="lcu-popup" maxWidth={340} minWidth={280} closeButton={true} autoPan={true}>
-                <LCUMapPopup
-                  lcu={lcu}
-                  lamps={group}
-                  toggleLamp={toggleLamp}
-                  toggleLCUGroup={toggleLCUGroup}
-                  togglingLamp={togglingLamp}
-                  togglingLCU={togglingLCU}
-                  onFlyTo={flyTo}
-                  onSelect={(l) => setSelected({ type:'lamp', data:l })}
-                />
-              </Popup>
+            <Marker key={`lcu-${lcu.id}`} longitude={Number(lcu.longitude)} latitude={Number(lcu.latitude)} anchor="bottom"
+              onClick={(event) => {
+                event.originalEvent.stopPropagation()
+                setSelected({ type: 'lcu', data: lcu })
+                setExpandedLCU(lcu.id)
+              }}>
+              <LCUMarkerVisual lcu={lcu} count={count} selected={isSelected} />
             </Marker>
           )
         })}
-      </MapContainer>
+
+        {selected?.type === 'lcu' && selected.data.latitude != null && selected.data.longitude != null && (
+          <Popup longitude={Number(selected.data.longitude)} latitude={Number(selected.data.latitude)}
+            anchor="bottom" offset={36} closeButton onClose={() => setSelected(null)}
+            maxWidth="340px" className="lcu-popup">
+            <LCUMapPopup
+              lcu={selected.data}
+              lamps={lampsByLCU[selected.data.id] || []}
+              toggleLamp={toggleLamp}
+              toggleLCUGroup={toggleLCUGroup}
+              togglingLamp={togglingLamp}
+              togglingLCU={togglingLCU}
+              onFlyTo={flyTo}
+              onSelect={(lamp) => setSelected({ type: 'lamp', data: lamp })}
+            />
+          </Popup>
+        )}
+      </MapboxMap>
+
+      {/* ═══ RECENTER-ON-ALL BUTTON (sits below the fullscreen control) ═══ */}
+      <button
+        onClick={recenterAll}
+        title="Recentrer sur tous les équipements"
+        className="absolute right-2.5 top-14 z-[500] flex h-[29px] w-[29px] items-center justify-center rounded-md map-glass text-white/70 transition-colors hover:bg-white/15 hover:text-white">
+        <Maximize size={15} />
+      </button>
+
+      {/* ═══ DRIVING ROUTE PANEL ══════════════════════════════ */}
+      <RoutePanel status={routeStatus} error={routeError} route={route} onClear={clearRoute} />
 
       {/* ═══ TOP STATS BAR ═════════════════════════════════════ */}
       <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[500] map-glass flex items-center gap-0.5 px-3 py-1.5 text-[11px]">
@@ -841,15 +1134,15 @@ export default function MapPage() {
                   ))}
                 </div>
 
-                {/* Tile selector */}
+                {/* Map-mode selector — Standard / Satellite / 3D day / 3D night */}
                 <div>
-                  <p className="text-[10px] font-semibold text-white/35 uppercase tracking-widest mb-2">Fond de carte</p>
-                  <div className="flex gap-1 p-1 rounded-xl bg-white/5">
-                    {Object.keys(TILES).map((k) => (
-                      <button key={k} onClick={() => setTile(k)}
+                  <p className="text-[10px] font-semibold text-white/35 uppercase tracking-widest mb-2">Mode de carte</p>
+                  <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-white/5">
+                    {Object.keys(MAP_MODES).map((k) => (
+                      <button key={k} onClick={() => setMapMode(k)}
                         className={cn(
-                          'flex-1 py-1.5 rounded-lg text-[11px] font-medium transition-all',
-                          tile === k ? 'bg-brand-500 text-white' : 'text-white/45 hover:text-white/70'
+                          'py-1.5 rounded-lg text-[11px] font-medium transition-all',
+                          mapMode === k ? 'bg-brand-500 text-white' : 'text-white/45 hover:text-white/70'
                         )}>{k}</button>
                     ))}
                   </div>
@@ -1126,6 +1419,36 @@ export default function MapPage() {
         </div>
       )}
 
+      {/* ═══ REPOSITION EXISTING LAMP BANNER ══════════════════ */}
+      {repositioning && (
+        <div className="pointer-events-none absolute left-1/2 top-3 z-[650] -translate-x-1/2">
+          <div className="map-glass pointer-events-auto flex flex-wrap items-center justify-center gap-4 px-5 py-3"
+            style={{ border: '1px solid rgba(14,165,233,0.55)', boxShadow: '0 0 28px rgba(14,165,233,0.22)' }}>
+            <LocateFixed size={17} className="shrink-0 animate-pulse text-sky-400" />
+            <div>
+              <p className="text-[10px] font-medium uppercase tracking-wider text-sky-300/70">Repositionnement du lampadaire</p>
+              <p className="font-mono text-[14px] font-bold leading-tight text-white">{repositioning.reference}</p>
+              <p className="mt-0.5 text-[10px] text-white/45">Glissez le marqueur ou cliquez sur la nouvelle position.</p>
+            </div>
+            <div className="hidden h-9 w-px bg-white/10 sm:block" />
+            <div className="font-mono text-[10px] leading-relaxed text-white/55">
+              <p>{repositioning.latitude.toFixed(6)}</p>
+              <p>{repositioning.longitude.toFixed(6)}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={cancelReposition} disabled={savingReposition}
+                className="rounded-lg bg-white/10 px-3 py-1.5 text-[11px] font-medium text-white/65 transition-colors hover:bg-white/15 hover:text-white disabled:opacity-40">
+                Annuler
+              </button>
+              <button type="button" onClick={saveReposition} disabled={savingReposition || !repositionChanged}
+                className="rounded-lg border border-sky-400/45 bg-sky-500/20 px-3 py-1.5 text-[11px] font-bold text-sky-300 transition-colors hover:bg-sky-500/30 disabled:cursor-not-allowed disabled:opacity-40">
+                {savingReposition ? 'Enregistrement…' : 'Enregistrer la position'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ═══ PLACEMENT MODE BANNER ════════════════════════════ */}
       {placing && (() => {
         const lamp = placing.queue[placing.idx]
@@ -1179,9 +1502,13 @@ export default function MapPage() {
                 lamp={selected.data}
                 lcu={lcus.find((l) => Number(l.id) === Number(selected.data.lcu_id)) ?? null}
                 allLCUs={lcus}
-                onClose={() => setSelected(null)}
+                onClose={() => { setRepositioning(null); setSelected(null) }}
                 flyTo={flyTo}
                 onUpdateIntensity={updateLampIntensity}
+                onStartReposition={startReposition}
+                isRepositioning={repositioning?.lampId === selected.data.id}
+                onDirections={() => handleDirections('lamp', selected.data)}
+                routeLoading={routeStatus === 'loading'}
                 onAIInsight={(info) => setAiPanel(info)}
                 onLCUAssigned={(lampId, newLcuId) => {
                   setLamps((prev) => prev.map((l) => l.id === lampId ? { ...l, lcu_id: newLcuId } : l))
@@ -1206,6 +1533,8 @@ export default function MapPage() {
                 applyGroupIntensity={applyGroupIntensity}
                 togglingLamp={togglingLamp}
                 togglingLCU={togglingLCU}
+                onDirections={() => handleDirections('lcu', selected.data)}
+                routeLoading={routeStatus === 'loading'}
                 onAIInsight={(info) => setAiPanel(info)} />
             )}
           </div>
@@ -1216,7 +1545,7 @@ export default function MapPage() {
 }
 
 /* ──────────────────────────────────────────────────────────────
-   LCU MAP POPUP (rendered inside Leaflet Popup)
+   LCU MAP POPUP (rendered inside a Mapbox Popup)
 ───────────────────────────────────────────────────────────── */
 function LCUMapPopup({ lcu, lamps, toggleLamp, toggleLCUGroup, togglingLamp, togglingLCU, onFlyTo, onSelect }) {
   const allOn  = lamps.length > 0 && lamps.every((l) => (l.intensite ?? 0) > 0)
@@ -1276,7 +1605,6 @@ function LCUMapPopup({ lcu, lamps, toggleLamp, toggleLCUGroup, togglingLamp, tog
         )}
         {lamps.map((l) => {
           const hex = STATUS[l.etat]?.hex || '#6b7280'
-          const isOn = (l.intensite ?? 0) > 0
           const isToggling = togglingLamp.has(l.id)
           return (
             <div key={l.id} style={{
@@ -1302,7 +1630,7 @@ function LCUMapPopup({ lcu, lamps, toggleLamp, toggleLCUGroup, togglingLamp, tog
 /* ──────────────────────────────────────────────────────────────
    LAMP CARD (bottom panel)
 ───────────────────────────────────────────────────────────── */
-function LampCard({ lamp, lcu, allLCUs = [], onClose, flyTo, onUpdateIntensity, onSelectLCU, onLCUAssigned, onAIInsight }) {
+function LampCard({ lamp, lcu, allLCUs = [], onClose, flyTo, onUpdateIntensity, onSelectLCU, onLCUAssigned, onAIInsight, onStartReposition, isRepositioning, onDirections, routeLoading }) {
   const [dimVal, setDimVal]         = useState(lamp.intensite ?? 0)
   const [dimming, setDimming]       = useState(false)
   const [telemetry, setTelemetry]   = useState(null)
@@ -1465,6 +1793,21 @@ function LampCard({ lamp, lcu, allLCUs = [], onClose, flyTo, onUpdateIntensity, 
 
       {/* Actions */}
       <div className="flex items-center gap-0.5 shrink-0">
+        <button type="button" onClick={() => onStartReposition?.(lamp)} disabled={isRepositioning}
+          className={cn(
+            'mr-1 flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10px] font-semibold transition-colors',
+            isRepositioning
+              ? 'border-sky-400/40 bg-sky-500/20 text-sky-300'
+              : 'border-white/10 bg-white/5 text-white/50 hover:border-sky-400/40 hover:bg-sky-500/15 hover:text-sky-300'
+          )}
+          title="Déplacer ce lampadaire sur la carte">
+          <LocateFixed size={12} /> {isRepositioning ? 'Déplacement…' : 'Repositionner'}
+        </button>
+        <button type="button" onClick={onDirections} disabled={routeLoading}
+          className="mr-1 flex items-center gap-1.5 rounded-lg border border-brand-500/30 bg-brand-500/10 px-2.5 py-1.5 text-[10px] font-semibold text-brand-400 transition-colors hover:bg-brand-500/20 disabled:opacity-40"
+          title="Itinéraire routier depuis ma position">
+          <Navigation size={12} /> {routeLoading ? 'Calcul…' : 'Itinéraire'}
+        </button>
         <button
           onClick={() => onAIInsight?.({ entityType: 'lampadaire', entityId: lamp.id })}
           className="p-1.5 rounded-lg hover:bg-white/8 text-white/25 hover:text-purple-400 transition-colors"
@@ -1498,7 +1841,7 @@ function LampCard({ lamp, lcu, allLCUs = [], onClose, flyTo, onUpdateIntensity, 
 /* ──────────────────────────────────────────────────────────────
    LCU CARD (bottom panel)
 ───────────────────────────────────────────────────────────── */
-function LCUCard({ lcu, lamps, onClose, onSelect, flyTo, toggleLamp, toggleLCUGroup, applyGroupIntensity, togglingLamp, togglingLCU, onAIInsight }) {
+function LCUCard({ lcu, lamps, onClose, onSelect, flyTo, toggleLamp, toggleLCUGroup, applyGroupIntensity, togglingLamp, togglingLCU, onAIInsight, onDirections, routeLoading }) {
   const navigate = useNavigate()
   const avgIntensity = lamps.length
     ? Math.round(lamps.reduce((s, l) => s + (l.intensite ?? 0), 0) / lamps.length)
@@ -1568,6 +1911,12 @@ function LCUCard({ lcu, lamps, onClose, onSelect, flyTo, toggleLamp, toggleLCUGr
           style={{ background:'rgba(139,92,246,0.15)', border:'1px solid rgba(139,92,246,0.4)', color:'#a78bfa' }}
           title="Créer un profil d'éclairage pour cette LCU">
           <Workflow size={11} /> Profil
+        </button>
+        <button onClick={onDirections} disabled={routeLoading}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all disabled:opacity-40"
+          style={{ background:'rgba(14,174,232,0.15)', border:'1px solid rgba(14,174,232,0.4)', color:'var(--brand)' }}
+          title="Itinéraire routier depuis ma position">
+          <Navigation size={11} /> {routeLoading ? 'Calcul…' : 'Itinéraire'}
         </button>
         {lcu.latitude && lcu.longitude && (
           <button onClick={() => flyTo(lcu.latitude, lcu.longitude, 16)}

@@ -57,6 +57,7 @@ export function commissioningColor(status) {
     configured:   { bg: 'bg-purple-100 dark:bg-purple-900/30', text: 'text-purple-700 dark:text-purple-400' },
     located:      { bg: 'bg-amber-100 dark:bg-amber-900/30', text: 'text-amber-700 dark:text-amber-400' },
     discovered:   { bg: 'bg-gray-100 dark:bg-gray-800',      text: 'text-gray-600 dark:text-gray-400' },
+    failed:       { bg: 'bg-red-100 dark:bg-red-900/30',      text: 'text-red-700 dark:text-red-400' },
   }
   return map[status] || map.discovered
 }
@@ -103,6 +104,7 @@ export function labelCommissioning(s) {
     configured: 'Configuré',
     located: 'Localisé',
     discovered: 'Découvert',
+    failed: 'Échec',
   }
   return map[s] || s
 }

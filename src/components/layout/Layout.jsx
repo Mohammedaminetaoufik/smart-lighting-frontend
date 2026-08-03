@@ -1,11 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import Sidebar from './Sidebar'
 import Header from './Header'
 import ErrorBoundary from '../ui/ErrorBoundary'
+import MaadenAIWelcomeModal from '../ai/MaadenAIWelcomeModal'
 import { getAlertCounts } from '../../api/alerts'
 import { QK } from '../../lib/queryClient'
+import { MAADEN_AI_WELCOME_STORAGE_KEY } from '../../utils/maadenAIWelcome'
 
 function useSidebarCollapsed() {
   const [collapsed, setCollapsed] = useState(
@@ -19,9 +21,17 @@ function useSidebarCollapsed() {
 }
 
 export default function Layout() {
+  const location = useLocation()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [collapsed, toggleCollapsed] = useSidebarCollapsed()
-  const location = useLocation()
+  const [showAIWelcome, setShowAIWelcome] = useState(() =>
+    location.pathname !== '/ai-assistant' &&
+    localStorage.getItem(MAADEN_AI_WELCOME_STORAGE_KEY) !== 'shown'
+  )
+
+  useEffect(() => {
+    if (showAIWelcome) localStorage.setItem(MAADEN_AI_WELCOME_STORAGE_KEY, 'shown')
+  }, [showAIWelcome])
 
   const { data: counts } = useQuery({
     queryKey: QK.alertCounts,
@@ -52,6 +62,11 @@ export default function Layout() {
           </ErrorBoundary>
         </main>
       </div>
+
+      <MaadenAIWelcomeModal
+        open={showAIWelcome}
+        onClose={() => setShowAIWelcome(false)}
+      />
     </div>
   )
 }

@@ -1,11 +1,16 @@
 import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, Map, Radio, Lightbulb, Settings2,
-  Bell, ClipboardList, FlaskConical, Users,
-  CheckSquare, Workflow, BarChart3, Server, ShieldAlert, Activity, Clock,
-  ChevronLeft, ChevronRight, Sparkles, UserCircle2,
+  Bell, ClipboardList, Users,
+  CheckSquare, Workflow, BarChart3, ShieldAlert, Activity, Clock,
+  ChevronLeft, ChevronRight, Sparkles, UserCircle2, ExternalLink,
 } from 'lucide-react'
+import { useAuth } from '../../context/AuthContext'
+import BrandLogo from '../brand/BrandLogo'
+import MaadenAILogo from '../brand/MaadenAILogo'
 import { cn } from '../../utils/helpers'
+
+const AI_DASHBOARD_URL = import.meta.env.VITE_AI_DASHBOARD_URL || 'http://localhost:5174'
 
 const NAV = [
   { label: 'Tableau de bord', icon: LayoutDashboard, to: '/' },
@@ -25,18 +30,18 @@ const NAV = [
   { label: 'Centre de décision IA', icon: Activity, to: '/ai-center' },
   { label: 'Assistant IA', icon: Sparkles, to: '/ai-assistant' },
   { divider: true, group: 'Administration' },
-  { label: 'Utilisateurs', icon: Users, to: '/users' },
-  { label: "Journal d'audit", icon: ShieldAlert, to: '/audit-log' },
-  { label: 'État du système', icon: Activity, to: '/system-health' },
-  { label: 'Infrastructure', icon: Server, to: '/admin' },
+  { label: 'Contrôle IA V1.5', icon: MaadenAILogo, to: AI_DASHBOARD_URL, roles: ['admin'], external: true },
+  { label: 'Utilisateurs', icon: Users, to: '/users', roles: ['admin'] },
+  { label: "Journal d'audit", icon: ShieldAlert, to: '/audit-log', roles: ['admin'] },
   { divider: true, group: 'Outils' },
-  { label: 'Simulateur IoT', icon: FlaskConical, to: '/simulator' },
-  { label: 'Paramètres', icon: Settings2, to: '/settings' },
+  { label: 'Paramètres', icon: Settings2, to: '/settings', roles: ['admin'] },
   { divider: true, group: 'Compte' },
   { label: 'Mon profil', icon: UserCircle2, to: '/profile' },
 ]
 
 export default function Sidebar({ mobileOpen, onMobileClose, collapsed, onToggleCollapse }) {
+  const { user } = useAuth()
+
   return (
     <>
       {/* Mobile overlay */}
@@ -53,25 +58,17 @@ export default function Sidebar({ mobileOpen, onMobileClose, collapsed, onToggle
         className={cn(
           'fixed top-0 left-0 z-30 h-full flex flex-col',
           'border-r transition-all duration-200',
-          'bg-white dark:bg-[#13151f] border-[var(--border)]',
+          'bg-[var(--surface)] border-[var(--border)]',
           collapsed ? 'w-16' : 'w-[240px]',
           mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         )}
       >
         {/* Brand */}
         <div className={cn(
-          'flex items-center border-b border-[var(--border)] shrink-0',
-          collapsed ? 'justify-center px-0 py-4' : 'gap-3 px-5 py-5'
+          'h-14 flex items-center border-b border-[var(--border)] shrink-0',
+          collapsed ? 'justify-center px-0' : 'px-3'
         )}>
-          <div className="w-8 h-8 rounded-lg bg-brand-500 flex items-center justify-center shadow-md shadow-brand-500/30 shrink-0">
-            <Lightbulb size={16} className="text-white" strokeWidth={2.5} />
-          </div>
-          {!collapsed && (
-            <div>
-              <p className="font-bold text-[13px] leading-tight text-[var(--text)]">Smart Lighting</p>
-              <p className="text-[10px] text-[var(--text-muted)] leading-tight">Télégestion IoT</p>
-            </div>
-          )}
+          <BrandLogo compact={collapsed} size="small" />
         </div>
 
         {/* Nav */}
@@ -83,6 +80,32 @@ export default function Sidebar({ mobileOpen, onMobileClose, collapsed, onToggle
                 <p key={`div-${item.group}`} className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] px-3 pt-4 pb-1">
                   {item.group}
                 </p>
+              )
+            }
+            if (item.roles && !item.roles.includes(user?.role)) return null
+            if (item.external) {
+              return (
+                <a
+                  key={item.to}
+                  href={item.to}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={onMobileClose}
+                  title={collapsed ? item.label : undefined}
+                  className={cn(
+                    'flex items-center gap-3 rounded-lg mb-0.5 text-[13px] font-medium transition-colors',
+                    'text-[var(--text-muted)] hover:bg-brand-500/10 hover:text-brand-500',
+                    collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2',
+                  )}
+                >
+                  <item.icon size={16} className="shrink-0" />
+                  {!collapsed && (
+                    <>
+                      <span>{item.label}</span>
+                      <ExternalLink size={11} className="ml-auto opacity-60" />
+                    </>
+                  )}
+                </a>
               )
             }
             return (

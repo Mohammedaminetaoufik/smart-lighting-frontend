@@ -1,6 +1,4 @@
 import Papa from 'papaparse'
-import { jsPDF } from 'jspdf'
-import autoTable from 'jspdf-autotable'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -77,6 +75,10 @@ const PRIORITY_LABELS_PDF = { low: 'Faible', medium: 'Moyen', high: 'Élevé', c
 export async function exportAIResultToPDF(result, chartElementRef = null) {
   if (!result) throw new Error('Aucun résultat à exporter.')
 
+  const [{ jsPDF }, { default: autoTable }] = await Promise.all([
+    import('jspdf'),
+    import('jspdf-autotable'),
+  ])
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
   const pageW = doc.internal.pageSize.getWidth()
   const pageH = doc.internal.pageSize.getHeight()
@@ -125,7 +127,7 @@ export async function exportAIResultToPDF(result, chartElementRef = null) {
   doc.setFontSize(13)
   doc.setTextColor(255, 255, 255)
   doc.setFont(undefined, 'bold')
-  doc.text('Rapport Assistant IA — Lamalif Télégestion', M, 13)
+  doc.text('Rapport Assistant IA — MAADEN Smart Controlling', M, 13)
   y = 28
 
   // ── Meta line ───────────────────────────────────────────────────────
@@ -256,7 +258,7 @@ export async function exportAIResultToPDF(result, chartElementRef = null) {
     doc.setFontSize(7.5)
     doc.setTextColor(...C_MUTED)
     doc.setFont(undefined, 'normal')
-    doc.text('Lamalif Télégestion — Document confidentiel', M, pageH - 7)
+    doc.text('MAADEN Smart Controlling — Document confidentiel', M, pageH - 7)
     doc.text(`Page ${i} / ${total}`, pageW - M, pageH - 7, { align: 'right' })
     // thin footer line
     doc.setDrawColor(...C_BORDER)

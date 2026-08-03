@@ -45,24 +45,63 @@ export function freshnessFromDate(iso, now = Date.now()) {
   return 'obsolete'
 }
 
+const validDate = (value) => Boolean(value) && !Number.isNaN(new Date(value).getTime())
+const cleanText = (value, fallback = '') => String(value ?? fallback).trim().replace(/\s+/g, ' ')
+const titleCase = (value) => cleanText(value).toLocaleLowerCase('fr-FR').replace(/(^|[\s'-])\p{L}/gu, (letter) => letter.toLocaleUpperCase('fr-FR'))
+
+/** Return validation errors without mutating the received API record. */
+export function validatePrediction(p) {
+  const errors = []
+  if (!p || typeof p !== 'object' || Array.isArray(p)) return ['record']
+  if (!Number.isFinite(Number(p.id)) || Number(p.id) <= 0) errors.push('id')
+  if (!cleanText(p.reference)) errors.push('reference')
+  if (!validDate(p.prediction_generated_at)) errors.push('prediction_generated_at')
+  if (!Number.isFinite(Number(p.risk_score))) errors.push('risk_score')
+  if (!Number.isFinite(Number(p.confidence))) errors.push('confidence')
+  return errors
+}
+
 /** Guard against incoherent values coming from the API. */
 export function sanitizePrediction(p) {
   const clampPct = (v) => Math.max(0, Math.min(100, Number(v) || 0))
+  const riskScore = clampPct(p.risk_score)
+  const telemetryFreshness = FRESHNESS_META[p.telemetry_freshness]
+    ? p.telemetry_freshness
+    : freshnessFromDate(p.last_telemetry_at)
+  const hasEnoughData = telemetryFreshness !== 'unavailable'
   return {
     ...p,
-    zone: (p.zone || 'Sans zone').trim(),
-    risk_score: clampPct(p.risk_score),
+    id: Number(p.id),
+    reference: cleanText(p.reference),
+    zone: titleCase(p.zone || 'Sans zone'),
+    lcu_reference: cleanText(p.lcu_reference),
+    risk_score: riskScore,
     confidence: clampPct(p.confidence),
     eta_hours: Math.max(0, Number(p.eta_hours) || 0),
-    telemetry_freshness: FRESHNESS_META[p.telemetry_freshness] ? p.telemetry_freshness : 'unavailable',
-    risk_level: RISK_META[p.risk_level] ? p.risk_level : riskLevelFromScore(p.risk_score, true),
+    telemetry_freshness: telemetryFreshness,
+    online: Boolean(p.online) && ['fresh', 'delayed'].includes(telemetryFreshness),
+    risk_level: hasEnoughData ? riskLevelFromScore(riskScore, true) : 'unknown',
   }
+}
+
+/** Validate, normalize and de-duplicate records by reference. */
+export function sanitizePredictions(rows) {
+  const references = new Set()
+  return (Array.isArray(rows) ? rows : []).flatMap((row) => {
+    if (validatePrediction(row).length > 0) return []
+    const item = sanitizePrediction(row)
+    const key = item.reference.toLocaleLowerCase('fr-FR')
+    if (references.has(key)) return []
+    references.add(key)
+    return [item]
+  })
 }
 
 /** Filter predictions by the active filter set. */
 export function filterPredictions(items, filters = {}) {
   const q = (filters.search || '').trim().toLowerCase()
   return (items || []).filter((p) => {
+    if (filters.periodHours && (!p.eta_hours || p.eta_hours > Number(filters.periodHours))) return false
     if (filters.zone && filters.zone !== 'all' && p.zone !== filters.zone) return false
     if (filters.lcu && filters.lcu !== 'all' && p.lcu_reference !== filters.lcu) return false
     if (filters.riskLevel && filters.riskLevel !== 'all' && p.risk_level !== filters.riskLevel) return false
@@ -73,6 +112,65 @@ export function filterPredictions(items, filters = {}) {
     if (q && !(`${p.reference} ${p.zone} ${p.lcu_reference}`.toLowerCase().includes(q))) return false
     return true
   })
+}
+
+/** Derive filtered KPI values from the same records displayed in the table. */
+export function summarizePredictions(items, base = {}) {
+  const rows = items || []
+  const count = (level) => rows.filter((p) => p.risk_level === level).length
+  const atRisk = rows.filter((p) => ['critical', 'high', 'moderate'].includes(p.risk_level))
+  const known = rows.filter((p) => p.telemetry_freshness !== 'unavailable')
+  const stale = rows.filter((p) => ['stale', 'obsolete'].includes(p.telemetry_freshness)).length
+  const missing = rows.filter((p) => p.telemetry_freshness === 'unavailable').length
+  return {
+    ...base,
+    at_risk_count: atRisk.length,
+    critical_count: count('critical'),
+    high_risk_count: count('high'),
+    moderate_risk_count: count('moderate'),
+    predicted_failures_30d: rows.filter((p) => p.eta_hours > 0 && p.eta_hours <= 720).length,
+    average_model_confidence: known.length
+      ? Math.round(known.reduce((sum, p) => sum + p.confidence, 0) / known.length)
+      : 0,
+    average_rule_reliability: known.length
+      ? Math.round(known.reduce((sum, p) => sum + p.confidence, 0) / known.length)
+      : 0,
+    scoring_method: 'deterministic_threshold_rules',
+    priority_interventions: rows.filter((p) => ['critical', 'high'].includes(p.risk_level)).length,
+    created_work_orders: rows.filter((p) => p.work_order_id != null).length,
+    stale_telemetry_count: stale,
+    missing_telemetry_count: missing,
+    data_quality_score: rows.length ? Math.max(0, Math.round(((rows.length - stale - missing) / rows.length) * 100)) : 100,
+  }
+}
+
+/** Build the cause chart from the exact same filtered prediction set. */
+export function distributePredictions(items) {
+  const groups = new Map()
+  for (const item of items || []) {
+    const key = item.fault_status || 'unknown'
+    const current = groups.get(key) || { fault_type: key, label: item.predicted_label || key, count: 0, score_sum: 0 }
+    current.count += 1
+    current.score_sum += item.risk_score
+    groups.set(key, current)
+  }
+  return {
+    by_type: [...groups.values()].map(({ score_sum, ...group }) => ({
+      ...group,
+      average_risk_score: Math.round(score_sum / group.count),
+      evolution_percent: null,
+    })),
+  }
+}
+
+export function mergeDistribution(current, historical) {
+  const history = new Map((historical?.by_type || []).map((item) => [item.fault_type, item]))
+  return {
+    by_type: (current?.by_type || []).map((item) => ({
+      ...item,
+      evolution_percent: history.get(item.fault_type)?.evolution_percent ?? null,
+    })),
+  }
 }
 
 /** Sort predictions by a key with a direction. */
@@ -88,7 +186,7 @@ export function sortPredictions(items, key = 'risk_score', dir = 'desc') {
 
 /** Build a CSV string from predictions (for export). */
 export function buildPredictionsCsv(items) {
-  const header = ['Reference', 'Zone', 'LCU', 'En ligne', 'Niveau', 'Score', 'Panne probable', 'Echeance', 'Confiance', 'Fraicheur']
+  const header = ['Reference', 'Zone', 'LCU', 'En ligne', 'Niveau', 'Score', 'Panne probable', 'Echeance', 'Fiabilite du score', 'Fraicheur']
   const rows = (items || []).map((p) => [
     p.reference, p.zone, p.lcu_reference, p.online ? 'oui' : 'non',
     RISK_META[p.risk_level]?.label ?? p.risk_level, `${p.risk_score}%`,
@@ -98,8 +196,67 @@ export function buildPredictionsCsv(items) {
 }
 
 /* ── API (real endpoints — see faults_predictive.go) ───────────────────────── */
-export const getPredictiveSummary = () => client.get('/faults/predictive-summary')
-export const getPredictions       = () => client.get('/faults/predictions').then((rows) => (rows || []).map(sanitizePrediction))
-export const getRiskTrend         = (days = 30) => client.get('/faults/trend', { params: { days } })
+export const getPredictiveSummary = ({ signal } = {}) => client.get('/faults/predictive-summary', { signal })
+export const getPredictions       = ({ signal } = {}) => client.get('/faults/predictions', { signal }).then(sanitizePredictions)
+const apiFilterParams = (filters = {}) => ({
+    days: Math.max(1, Math.round((filters.periodHours || 720) / 24)),
+    hours: filters.periodHours || 720,
+    zone: filters.zone !== 'all' ? filters.zone : undefined,
+    lcu: filters.lcu !== 'all' ? filters.lcu : undefined,
+    risk_level: filters.riskLevel !== 'all' ? filters.riskLevel : undefined,
+    fault_type: filters.faultType !== 'all' ? filters.faultType : undefined,
+    online: filters.online !== 'all' ? filters.online : undefined,
+    freshness: filters.freshness !== 'all' ? filters.freshness : undefined,
+    search: cleanText(filters.search) || undefined,
+})
+export const getRiskTrend = (filters = {}, signal) => client.get('/faults/trend', {
+  signal,
+  params: apiFilterParams(filters),
+})
 export const getFaultDistribution = () => client.get('/faults/stats')
-export const getLampPrediction    = (id) => client.get(`/lampadaires/${id}/prediction`)
+export const getPredictiveDistribution = (filters = {}, signal) => client.get('/faults/predictive-distribution', {
+  signal,
+  params: apiFilterParams(filters),
+})
+export const getLampPrediction    = (id) => client.get(`/lampadaires/${id}/prediction`).then((row) => ({
+  ...sanitizePrediction(row),
+  signals: Array.isArray(row?.signals) ? row.signals : [],
+  recommendation: cleanText(row?.recommendation, 'Inspection du luminaire recommandée.'),
+}))
+
+export async function createWorkOrderFromPrediction(item) {
+  if (!item) throw new Error('Prédiction introuvable')
+  if (item.work_order_id) return { id: item.work_order_id, existed: true }
+  const details = item.recommendation ? item : await getLampPrediction(item.id)
+  const explanation = details.predictive_explanation
+  const plan = Array.isArray(explanation?.preventive_plan)
+    ? explanation.preventive_plan
+        .map((step, index) => `${step.order ?? index + 1}. ${step.action}${step.why ? ` — ${step.why}` : ''}`)
+        .join('\n')
+    : ''
+  const description = [
+    `Risque ${details.risk_score}% · fiabilité du score ${details.confidence}% · échéance ${details.eta_label}.`,
+    explanation?.situation_summary,
+    explanation?.likely_scenario ? `Scénario à confirmer : ${explanation.likely_scenario}` : '',
+    explanation?.operational_impact ? `Impact possible : ${explanation.operational_impact}` : '',
+  ].filter(Boolean).join('\n\n')
+  const recommendedAction = plan || explanation?.decision || details.recommendation
+  const dueDate = new Date(Date.now() + Math.max(1, details.eta_hours || 24) * 3600000)
+  const priority = { critical: 'urgent', high: 'high', moderate: 'medium', low: 'low' }[details.risk_level] || 'medium'
+  const workOrder = await client.post('/workorders', {
+    title: `Maintenance prédictive — ${details.reference}`,
+    description,
+    priority,
+    source_type: 'predictive_maintenance',
+    lampadaire_id: details.id,
+    zone: details.zone,
+    equipment_type: 'lampadaire',
+    equipment_reference: details.reference,
+    crew_type: 'lighting',
+    team_type: 'lighting',
+    due_date: dueDate.toISOString(),
+    probable_cause: details.predicted_label,
+    recommended_action: recommendedAction,
+  })
+  return { ...workOrder, existed: false }
+}

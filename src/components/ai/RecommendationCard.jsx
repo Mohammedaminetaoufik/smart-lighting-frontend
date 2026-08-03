@@ -63,7 +63,7 @@ export default function RecommendationCard({ rec }) {
               <span className="font-mono">{rec.entity_reference}</span>
             )}
             <span>{SOURCE_LABEL[rec.source] ?? rec.source}</span>
-            {rec.confidence != null && <span>· {Math.round(rec.confidence * 100)}%</span>}
+            {rec.confidence != null && <span>· indice IA {Math.round(rec.confidence * 100)}%</span>}
             {hasEvidence && (
               <button
                 onClick={() => setOpen((v) => !v)}
